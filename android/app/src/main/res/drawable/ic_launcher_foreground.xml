@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A gamepad silhouette inside the adaptive icon's 66 dp safe zone; the holes are cut with evenOdd. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="@color/icon_foreground"
+        android:fillType="evenOdd"
+        android:pathData="M40,40 L68,40 C75,40 79,44 80.5,50 L83.5,62 C85,68 78,72 74,67 L69.5,62 L38.5,62 L34,67 C30,72 23,68 24.5,62 L27.5,50 C29,44 33,40 40,40 Z M35.5,47 L35.5,50.5 L32,50.5 L32,54.5 L35.5,54.5 L35.5,58 L39.5,58 L39.5,54.5 L43,54.5 L43,50.5 L39.5,50.5 L39.5,47 Z M71,47.5 A2.5,2.5 0 1,0 71,52.5 A2.5,2.5 0 1,0 71,47.5 Z M71,53.5 A2.5,2.5 0 1,0 71,58.5 A2.5,2.5 0 1,0 71,53.5 Z M66,50.5 A2.5,2.5 0 1,0 66,55.5 A2.5,2.5 0 1,0 66,50.5 Z M76,50.5 A2.5,2.5 0 1,0 76,55.5 A2.5,2.5 0 1,0 76,50.5 Z" />
+</vector>

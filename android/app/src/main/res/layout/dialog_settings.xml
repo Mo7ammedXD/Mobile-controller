@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingTop="12dp">
+
+        <!-- Game mode: the touch layout designed for a style of game. -->
+        <TextView
+            style="@style/SettingsLabel"
+            android:paddingTop="0dp"
+            android:text="@string/settings_mode" />
+
+        <Spinner
+            android:id="@+id/mode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp" />
+
+        <TextView
+            android:id="@+id/mode_description"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:textAppearance="?android:attr/textAppearanceSmall" />
+
+        <!-- Feel of the selected mode: stick shaping on the left, motion controls on the right. -->
+        <TextView
+            style="@style/SettingsLabel"
+            android:text="@string/settings_feel" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="16dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/anti_deadzone_label"
+                    style="@style/SettingsValue" />
+
+                <SeekBar
+                    android:id="@+id/anti_deadzone"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp" />
+
+                <TextView
+                    android:id="@+id/curve_label"
+                    style="@style/SettingsValue" />
+
+                <SeekBar
+                    android:id="@+id/curve"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp" />
+
+                <TextView
+                    android:id="@+id/sensitivity_label"
+                    style="@style/SettingsValue" />
+
+                <SeekBar
+                    android:id="@+id/sensitivity"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <Switch
+                    android:id="@+id/motion"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp" />
+
+                <TextView
+                    android:id="@+id/motion_note"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?android:attr/textAppearanceSmall"
+                    android:visibility="gone" />
+
+                <CheckBox
+                    android:id="@+id/gyro_while_aiming"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/settings_gyro_while_aiming" />
+
+                <CheckBox
+                    android:id="@+id/gyro_invert"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/settings_gyro_invert" />
+
+                <TextView
+                    android:id="@+id/motion_sensitivity_label"
+                    style="@style/SettingsValue" />
+
+                <SeekBar
+                    android:id="@+id/motion_sensitivity"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <!-- Left column: which PC to drive. -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="16dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/SettingsLabel"
+                    android:text="@string/settings_pc" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <EditText
+                        android:id="@+id/host"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="@string/hint_host"
+                        android:imeOptions="flagNoExtractUi|actionNext"
+                        android:importantForAutofill="no"
+                        android:inputType="textUri"
+                        android:maxLines="1"
+                        android:minHeight="48dp" />
+
+                    <EditText
+                        android:id="@+id/port"
+                        android:layout_width="96dp"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/hint_port"
+                        android:imeOptions="flagNoExtractUi|actionDone"
+                        android:importantForAutofill="no"
+                        android:inputType="number"
+                        android:maxLength="5"
+                        android:minHeight="48dp" />
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/find"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/find_pc" />
+
+                <TextView
+                    android:id="@+id/discovery_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingVertical="4dp"
+                    android:textAppearance="?android:attr/textAppearanceSmall"
+                    android:visibility="gone" />
+
+                <LinearLayout
+                    android:id="@+id/servers"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <TextView
+                    style="@style/SettingsLabel"
+                    android:text="@string/settings_rate" />
+
+                <RadioGroup
+                    android:id="@+id/rate"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <RadioButton
+                        android:id="@+id/rate_60"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="12dp"
+                        android:text="@string/rate_60" />
+
+                    <RadioButton
+                        android:id="@+id/rate_90"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="12dp"
+                        android:text="@string/rate_90" />
+
+                    <RadioButton
+                        android:id="@+id/rate_120"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/rate_120" />
+                </RadioGroup>
+
+                <TextView
+                    android:id="@+id/deadzone_label"
+                    style="@style/SettingsValue" />
+
+                <SeekBar
+                    android:id="@+id/deadzone"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="20"
+                    android:minHeight="48dp" />
+            </LinearLayout>
+
+            <!-- Right column: comfort. -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/SettingsLabel"
+                    android:text="@string/settings_comfort" />
+
+                <Switch
+                    android:id="@+id/haptics"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/settings_haptics" />
+
+                <Switch
+                    android:id="@+id/rumble"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/settings_rumble" />
+
+                <Switch
+                    android:id="@+id/floating"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/settings_floating" />
+
+                <Switch
+                    android:id="@+id/dim"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/settings_dim" />
+
+                <Switch
+                    android:id="@+id/left_handed"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/settings_left_handed" />
+
+                <Switch
+                    android:id="@+id/auto_mode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/settings_auto_mode" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

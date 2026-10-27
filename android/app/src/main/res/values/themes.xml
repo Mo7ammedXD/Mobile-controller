@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MobileController" parent="android:Theme.DeviceDefault.NoActionBar.Fullscreen">
+        <!-- Matches the controller surface, so there is no flash before the first frame. -->
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:colorBackground">@color/background</item>
+    </style>
+
+    <style name="SettingsLabel">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:textAppearance">?android:attr/textAppearanceMedium</item>
+    </style>
+
+    <!-- The live value above a slider ("Anti-deadzone: 10 %"). -->
+    <style name="SettingsValue">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:textAppearance">?android:attr/textAppearanceSmall</item>
+    </style>
+</resources>

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mobile Controller</string>
+    <string name="surface_description">Game controller. Double-tap to open the settings.</string>
+
+    <!-- Status line (top centre). -->
+    <string name="status_connected">Connected</string>
+    <string name="status_dry_run">dry run</string>
+    <string name="status_waiting">Waiting for PC</string>
+    <string name="status_not_listening">PC not listening</string>
+    <string name="status_server_full">Server full</string>
+    <string name="status_permission">Permission needed</string>
+    <string name="status_blocked">Local network access blocked</string>
+    <string name="status_no_route">No network route to the PC</string>
+    <string name="status_unknown_host">Unknown host</string>
+    <string name="status_no_target">No PC selected. Tap the gear.</string>
+    <string name="status_editing">Drag to move · pinch or − / + to resize</string>
+
+    <!-- Layout editor toolbar. -->
+    <string name="edit_smaller">−</string>
+    <string name="edit_bigger">+</string>
+    <string name="edit_undo">Undo</string>
+    <string name="edit_snap">Snap</string>
+    <string name="edit_reset">Reset</string>
+    <string name="edit_cancel">Cancel</string>
+    <string name="edit_save">Save</string>
+
+    <!-- Settings dialog. -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_mode">Game mode</string>
+    <string name="mode_description">Best for: %1$s\n%2$s</string>
+    <string name="settings_pc">PC address</string>
+    <string name="hint_host">PC IP, e.g. 192.168.1.20</string>
+    <string name="hint_port">Port</string>
+    <string name="find_pc">Find PC</string>
+    <string name="discovery_searching">Searching the local network…</string>
+    <string name="discovery_none">No PC found. Is the server running, and is the phone on the same Wi-Fi or USB tethering?</string>
+    <plurals name="discovery_found">
+        <item quantity="one">Found %d PC. Tap it to select it.</item>
+        <item quantity="other">Found %d PCs. Tap one to select it.</item>
+    </plurals>
+    <string name="discovery_row">%1$s  ·  %2$s:%3$d  ·  pads %4$d/%5$d</string>
+    <string name="settings_rate">Send rate</string>
+    <string name="rate_60">60 Hz</string>
+    <string name="rate_90">90 Hz</string>
+    <string name="rate_120">120 Hz</string>
+    <string name="settings_haptics">Haptic feedback (buttons, misses, sprint)</string>
+    <string name="settings_rumble">Game rumble</string>
+    <string name="settings_deadzone">Stick deadzone: %d %%</string>
+    <string name="settings_feel">Feel in this mode</string>
+    <string name="settings_anti_deadzone">Anti-deadzone: %d %%</string>
+    <string name="settings_curve">Aim precision: %.1f</string>
+    <string name="settings_curve_linear">Aim precision: linear</string>
+    <string name="settings_sensitivity">Stick sensitivity: %d %%</string>
+    <string name="settings_motion_aim">Gyro aiming (turn the phone to aim)</string>
+    <string name="settings_motion_steer">Tilt steering (turn the phone like a wheel)</string>
+    <string name="settings_motion_none">No motion controls in this mode</string>
+    <string name="settings_motion_unavailable">This phone has no sensor for it</string>
+    <string name="settings_gyro_while_aiming">Only while aiming (LT held)</string>
+    <string name="settings_gyro_invert">Invert gyro up / down</string>
+    <string name="settings_motion_sensitivity">Motion sensitivity: %d %%</string>
+    <string name="settings_comfort">Comfort</string>
+    <string name="settings_floating">Buttons follow your thumb</string>
+    <string name="settings_dim">Dim the screen while playing</string>
+    <string name="settings_left_handed">Left-handed (mirror the layout)</string>
+    <string name="settings_auto_mode">Switch mode for the game on the PC</string>
+    <string name="mode_detected">Game detected: switched to %1$s</string>
+    <string name="edit_layout">Edit layout</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="error_host">Enter an IP address or host name</string>
+    <string name="error_port">Port must be 1–65535</string>
+
+    <!-- Android 17 local network permission. -->
+    <string name="permission_title">Local network access needed</string>
+    <string name="permission_message">Mobile Controller sends your touches to your PC over the local network (Wi-Fi or USB tethering). Android requires the local network permission for that; nothing is sent anywhere else.\n\nAllow it, or enable it in the app settings under Permissions.</string>
+    <string name="permission_retry">Allow</string>
+    <string name="permission_settings">App settings</string>
+    <string name="exit">Exit</string>
+
+    <string name="back_again">Press back again to exit</string>
+</resources>

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- UDP to the PC. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Finding the Wi-Fi network whose subnet contains the PC, to bind the socket to it. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Android 17+ (API 37) Local Network Protection: required for any LAN traffic. Runtime permission
+         (NEARBY_DEVICES group), requested only on API 37+; older versions ignore the declaration. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <!-- The low-latency Wi-Fi lock. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Game rumble. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Two thumbs plus a trigger finger need independently tracked touches. -->
+    <uses-feature
+        android:name="android.hardware.touchscreen.multitouch.distinct"
+        android:required="true" />
+    <uses-feature
+        android:name="android.hardware.wifi"
+        android:required="false" />
+
+    <application
+        android:allowBackup="true"
+        android:appCategory="game"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MobileController"
+        tools:targetApi="33">
+
+        <!-- sensorLandscape: Android 16+ ignores orientation locks on large screens, but exempts apps whose
+             appCategory is "game", which this one is.
+             configChanges: recreating the activity would reopen the socket on a new source port and the
+             PC would plug in a second virtual pad, so every change is handled in place instead. -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|grammaticalGender|fontScale|fontWeightAdjustment"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:screenOrientation="sensorLandscape"
+            tools:ignore="DiscouragedApi">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
