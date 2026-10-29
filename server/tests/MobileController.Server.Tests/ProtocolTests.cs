@@ -38,7 +38,7 @@ public sealed class ProtocolTests
     [InlineData("R1", "A5 11 00 00 00 00 00 00 00 00 00 00 00 00 00", "BadLength")]
     [InlineData("R2", "A5 21 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "BadVersion")]
     [InlineData("R3", "A4 11 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "BadMagic")]
-    [InlineData("R4", "A5 15 00 00", "UnknownType")]
+    [InlineData("R4", "A5 16 00 00", "UnknownType")]
     [InlineData("R5", "A5 19 FF 40 00 01 34 12", "WrongDirection")]
     [InlineData("R6", "A5 13 00", "BadLength")]
     public void Rejection_vectors_are_dropped_by_the_server(string id, string hex, string expected)
@@ -295,4 +295,122 @@ public sealed class ProtocolTests
     [Fact]
     public void PadState_has_the_XUSB_report_size() =>
         Assert.Equal(12, System.Runtime.CompilerServices.Unsafe.SizeOf<PadState>());
+
+    // §9.3 P10..P12: flags added with §12
+    [Theory]
+    [InlineData("P10", "A5 19 00 00 FF 49 05 00", (int)(FeedbackFlags.StatusAck | FeedbackFlags.TargetDs4 | FeedbackFlags.PadAttached), 5)]
+    [InlineData("P11", "A5 19 00 00 FF 50 00 00", (int)(FeedbackFlags.StatusAck | FeedbackFlags.AwaitingApproval), 0)]
+    [InlineData("P12", "A5 19 00 00 FF 60 00 00", (int)(FeedbackFlags.StatusAck | FeedbackFlags.Denied), 0)]
+    public void Feedback_flags_of_status_aware_clients(string id, string hex, int flagBits, int lastSeq)
+    {
+        var flags = (FeedbackFlags)flagBits;
+        var written = new byte[Protocol.FeedbackSize];
+        Protocol.WriteFeedback(written, 0, 0, Protocol.UnknownPlayer, flags, (ushort)lastSeq);
+        Assert.Equal(Hex.Bytes(hex), written);
+        Assert.True(Protocol.TryParseFeedback(written, out var feedback), id);
+        Assert.Equal(flags, feedback.Flags);
+    }
+
+    // §9.5
+    private const string S1 = "A5 15 EF CD AB 89 67 45 23 01 57 01 2A 00 78 02 02 00 00 05 07 50 69 78 65 6C 53 68 6F 6F 74 65 72";
+    private const string S2 = "A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 00 00";
+
+    [Fact]
+    public void S1_status_decodes_and_encodes()
+    {
+        var bytes = Hex.Bytes(S1);
+        Assert.Equal(33, bytes.Length);
+        Assert.True(Protocol.TryParseStatus(bytes, out var s));
+        Assert.Equal(0x0123456789ABCDEFUL, s.DeviceId);
+        Assert.Equal(87, s.Battery);
+        Assert.Equal(StatusFlags.Charging, s.Flags);
+        Assert.Equal(42, s.RttTenthsMs);
+        Assert.Equal(120, s.RateHz);
+        Assert.Equal(OutputPreference.DualShock4, s.Output);
+        Assert.Equal(2, s.AppVersion);
+        Assert.Equal("Pixel", Encoding.UTF8.GetString(s.DeviceName));
+        Assert.Equal("Shooter", Encoding.UTF8.GetString(s.ProfileName));
+
+        var written = new byte[Protocol.MaxStatusSize];
+        int length = Protocol.WriteStatus(written, 0x0123456789ABCDEF, 87, StatusFlags.Charging, 42, 120, OutputPreference.DualShock4, 2,
+            "Pixel"u8, "Shooter"u8);
+        Assert.Equal(bytes, written[..length]);
+    }
+
+    [Fact]
+    public void S2_unknown_fields_and_S3_extension_is_skipped()
+    {
+        Assert.True(Protocol.TryParseStatus(Hex.Bytes(S2), out var s2));
+        Assert.Equal(1UL, s2.DeviceId);
+        Assert.Equal(Protocol.UnknownBattery, s2.Battery);
+        Assert.Equal(Protocol.UnknownRtt, s2.RttTenthsMs);
+        Assert.Equal(OutputPreference.None, s2.Output);
+        Assert.True(s2.DeviceName.IsEmpty && s2.ProfileName.IsEmpty);
+
+        Assert.True(Protocol.TryParseStatus(Hex.Bytes("A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 02 01 00 AA BB 58"), out var s3));
+        Assert.Equal("X", Encoding.UTF8.GetString(s3.DeviceName));
+        Assert.True(s3.ProfileName.IsEmpty);
+
+        // An output value this version does not know means "no preference".
+        var odd = Hex.Bytes(S2);
+        odd[15] = 9;
+        Assert.True(Protocol.TryParseStatus(odd, out var s));
+        Assert.Equal(OutputPreference.None, s.Output);
+    }
+
+    [Fact]
+    public void S4_device_name_is_cut_at_a_character_boundary()
+    {
+        Span<byte> name = stackalloc byte[Protocol.MaxStatusFieldBytes];
+        int n = Protocol.EncodeName(new string('A', 31) + "é", name);
+        var written = new byte[Protocol.MaxStatusSize];
+        int length = Protocol.WriteStatus(written, 1, Protocol.UnknownBattery, StatusFlags.None, Protocol.UnknownRtt, 0,
+            OutputPreference.None, 0, name[..n], default);
+        Assert.Equal(Hex.Bytes("A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 1F 00" + string.Concat(Enumerable.Repeat(" 41", 31))),
+            written[..length]);
+    }
+
+    [Theory]
+    [InlineData("RS1", "A5 15 00 00", "BadLength")]
+    [InlineData("RS2", S2 + " 00", "BadLength")]
+    [InlineData("RS3", "A5 15 EF CD AB 89 67 45 23 01 57 01 2A 00 78 02 02 00 00 05 07 50 69 78 65 6C 53 68 6F 6F 74 65", "BadLength")]
+    [InlineData("RS4", "A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 21 00" +
+                       " 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41", "BadLength")]
+    [InlineData("RS5", "A5 15 00 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 00 00", "BadValue")]
+    public void Malformed_status_is_dropped_by_the_server(string id, string hex, string expected)
+    {
+        Assert.Equal(Enum.Parse<PacketStatus>(expected), Protocol.Validate(Hex.Bytes(hex), atServer: true, out _));
+        Assert.False(Protocol.TryParseStatus(Hex.Bytes(hex), out _), id);
+    }
+
+    [Fact]
+    public void RS6_status_is_dropped_by_the_client() =>
+        Assert.Equal(PacketStatus.WrongDirection, Protocol.Validate(Hex.Bytes(S1), atServer: false, out _));
+
+    // §9.6
+    [Fact]
+    public void C1_identify_and_C2_unknown_op()
+    {
+        var c1 = new byte[6];
+        Protocol.WriteCommand(c1, Protocol.CommandIdentify, [7, 30]);
+        Assert.Equal(Hex.Bytes("A5 1D 01 02 07 1E"), c1);
+        Assert.True(Protocol.TryParseCommand(c1, out byte op, out var args));
+        Assert.Equal(Protocol.CommandIdentify, op);
+        Assert.Equal(new byte[] { 7, 30 }, args.ToArray());
+
+        Assert.True(Protocol.TryParseCommand(Hex.Bytes("A5 1D 7F 00"), out op, out args));
+        Assert.Equal(0x7F, op);
+        Assert.True(args.IsEmpty);
+    }
+
+    [Theory]
+    [InlineData("A5 1D 01 02 07")]
+    [InlineData("A5 1D 01 21 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")]
+    [InlineData("A5 1D 01")]
+    public void Malformed_commands_are_rejected_by_the_client(string hex) =>
+        Assert.False(Protocol.TryParseCommand(Hex.Bytes(hex), out _, out _));
+
+    [Fact]
+    public void C1_is_dropped_by_the_server() =>
+        Assert.Equal(PacketStatus.WrongDirection, Protocol.Validate(Hex.Bytes("A5 1D 01 02 07 1E"), atServer: true, out _));
 }

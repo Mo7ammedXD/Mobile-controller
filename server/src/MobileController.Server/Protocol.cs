@@ -12,10 +12,12 @@ internal enum PacketType : byte
     Ping = 0x2,
     Bye = 0x3,
     Discover = 0x4,
+    Status = 0x5,
     Feedback = 0x9,
     Pong = 0xA,
     Game = 0xB,
     DiscoverReply = 0xC,
+    Command = 0xD,
 }
 
 [Flags]
@@ -25,6 +27,27 @@ internal enum FeedbackFlags : byte
     PadAttached = 1 << 0,
     ServerFull = 1 << 1,
     DryRun = 1 << 2,
+    TargetDs4 = 1 << 3,
+    AwaitingApproval = 1 << 4,
+    Denied = 1 << 5,
+    StatusAck = 1 << 6,
+}
+
+[Flags]
+internal enum StatusFlags : byte
+{
+    None = 0,
+    Charging = 1 << 0,
+    MenuOpen = 1 << 1,
+    MotionActive = 1 << 2,
+}
+
+/// <summary>The pad a phone asks for in STATUS (§12), and the pad a slot actually has.</summary>
+internal enum OutputPreference : byte
+{
+    None = 0,
+    Xbox360 = 1,
+    DualShock4 = 2,
 }
 
 /// <summary>Why a datagram was dropped, in the order PROTOCOL.md §2 lists the checks.</summary>
@@ -37,6 +60,43 @@ internal enum PacketStatus : byte
     UnknownType,
     WrongDirection,
     BadLength,
+
+    /// <summary>Well-formed, but a field holds a forbidden value (STATUS with deviceId 0).</summary>
+    BadValue,
+}
+
+/// <summary>A validated STATUS (§12), read in place: the names are slices of the datagram.</summary>
+internal readonly ref struct StatusView
+{
+    public StatusView(ReadOnlySpan<byte> datagram)
+    {
+        DeviceId = BinaryPrimitives.ReadUInt64LittleEndian(datagram[2..]);
+        Battery = datagram[10];
+        Flags = (StatusFlags)datagram[11];
+        RttTenthsMs = BinaryPrimitives.ReadUInt16LittleEndian(datagram[12..]);
+        RateHz = datagram[14];
+        Output = datagram[15] is (byte)OutputPreference.Xbox360 or (byte)OutputPreference.DualShock4
+            ? (OutputPreference)datagram[15]
+            : OutputPreference.None;
+        AppVersion = BinaryPrimitives.ReadUInt16LittleEndian(datagram[16..]);
+        int e = datagram[18], d = datagram[19], p = datagram[20];
+        DeviceName = datagram.Slice(Protocol.StatusHeaderSize + e, d);
+        ProfileName = datagram.Slice(Protocol.StatusHeaderSize + e + d, p);
+    }
+
+    public ulong DeviceId { get; }
+
+    /// <summary>0..100, or <see cref="Protocol.UnknownBattery"/>.</summary>
+    public byte Battery { get; }
+    public StatusFlags Flags { get; }
+
+    /// <summary>Smoothed RTT in 0.1 ms, or <see cref="Protocol.UnknownRtt"/>.</summary>
+    public ushort RttTenthsMs { get; }
+    public byte RateHz { get; }
+    public OutputPreference Output { get; }
+    public ushort AppVersion { get; }
+    public ReadOnlySpan<byte> DeviceName { get; }
+    public ReadOnlySpan<byte> ProfileName { get; }
 }
 
 internal enum SequenceVerdict : byte
@@ -100,11 +160,22 @@ internal static class Protocol
     public const int MaxNameBytes = 32;
     public const int GameHeaderSize = 3;
     public const int MaxGameNameBytes = 64;
+    public const int StatusHeaderSize = 21;
+    public const int MaxStatusFieldBytes = 32;
+    public const int MaxStatusSize = StatusHeaderSize + 3 * MaxStatusFieldBytes;
+    public const int CommandHeaderSize = 4;
+    public const int MaxCommandArgBytes = 32;
 
-    /// <summary>The largest datagram of the protocol: a GAME with a 64-byte name.</summary>
+    /// <summary>The largest server → client datagram: a GAME with a 64-byte name.</summary>
     public const int MaxDatagramSize = GameHeaderSize + MaxGameNameBytes;
 
     public const byte UnknownPlayer = 0xFF;
+    public const byte UnknownBattery = 0xFF;
+    public const ushort UnknownRtt = 0xFFFF;
+
+    // COMMAND ops (§13).
+    public const byte CommandIdentify = 0x01;
+    public const byte CommandLightbar = 0x02;
 
     /// <summary>An INPUT whose seq is 1..64 behind the last accepted one is a reordered straggler (§3.3).</summary>
     public const int StaleWindow = 64;
@@ -144,11 +215,36 @@ internal static class Protocol
             PacketType.DiscoverReply => datagram.Length >= DiscoverReplyHeaderSize && datagram[6] <= MaxNameBytes
                 ? DiscoverReplyHeaderSize + datagram[6]
                 : -1,
+            PacketType.Status => datagram.Length >= StatusHeaderSize &&
+                                 datagram[18] <= MaxStatusFieldBytes && datagram[19] <= MaxStatusFieldBytes && datagram[20] <= MaxStatusFieldBytes
+                ? StatusHeaderSize + datagram[18] + datagram[19] + datagram[20]
+                : -1,
+            PacketType.Command => datagram.Length >= CommandHeaderSize && datagram[3] <= MaxCommandArgBytes
+                ? CommandHeaderSize + datagram[3]
+                : -1,
             _ => 0,
         };
         if (expected == 0) return PacketStatus.UnknownType;
         if (IsClientToServer(type) != atServer) return PacketStatus.WrongDirection;
-        return datagram.Length == expected ? PacketStatus.Ok : PacketStatus.BadLength;
+        if (datagram.Length != expected) return PacketStatus.BadLength;
+        if (type == PacketType.Status && BinaryPrimitives.ReadUInt64LittleEndian(datagram[2..]) == 0) return PacketStatus.BadValue;
+        return PacketStatus.Ok;
+    }
+
+    public static bool TryParseStatus(ReadOnlySpan<byte> datagram, out StatusView status)
+    {
+        bool ok = Validate(datagram, atServer: true, out var type) == PacketStatus.Ok && type == PacketType.Status;
+        status = ok ? new StatusView(datagram) : default;
+        return ok;
+    }
+
+    /// <summary>Client side; on success <paramref name="args"/> is the argument slice of <paramref name="datagram"/>.</summary>
+    public static bool TryParseCommand(ReadOnlySpan<byte> datagram, out byte op, out ReadOnlySpan<byte> args)
+    {
+        bool ok = Validate(datagram, atServer: false, out var type) == PacketStatus.Ok && type == PacketType.Command;
+        op = ok ? datagram[2] : (byte)0;
+        args = ok ? datagram.Slice(CommandHeaderSize, datagram[3]) : default;
+        return ok;
     }
 
     /// <summary>Decodes an already validated INPUT; the reserved button bit is masked off here.</summary>
@@ -300,6 +396,40 @@ internal static class Protocol
         var limited = destination[..Math.Min(destination.Length, MaxNameBytes)];
         var status = Utf8.FromUtf16(name, limited, out _, out int written);
         return status is OperationStatus.Done or OperationStatus.DestinationTooSmall ? written : 0;
+    }
+
+    /// <summary>Client side of §12 (tests and tools); names must already be encoded with <see cref="EncodeName"/>.</summary>
+    public static int WriteStatus(Span<byte> destination, ulong deviceId, byte battery, StatusFlags flags, ushort rttTenthsMs,
+        byte rateHz, OutputPreference output, ushort appVersion, ReadOnlySpan<byte> deviceName, ReadOnlySpan<byte> profileName)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(deviceName.Length, MaxStatusFieldBytes, nameof(deviceName));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(profileName.Length, MaxStatusFieldBytes, nameof(profileName));
+        int length = StatusHeaderSize + deviceName.Length + profileName.Length;
+        WriteHeader(destination, PacketType.Status, length);
+        BinaryPrimitives.WriteUInt64LittleEndian(destination[2..], deviceId);
+        destination[10] = battery;
+        destination[11] = (byte)flags;
+        BinaryPrimitives.WriteUInt16LittleEndian(destination[12..], rttTenthsMs);
+        destination[14] = rateHz;
+        destination[15] = (byte)output;
+        BinaryPrimitives.WriteUInt16LittleEndian(destination[16..], appVersion);
+        destination[18] = 0;
+        destination[19] = (byte)deviceName.Length;
+        destination[20] = (byte)profileName.Length;
+        deviceName.CopyTo(destination[StatusHeaderSize..]);
+        profileName.CopyTo(destination[(StatusHeaderSize + deviceName.Length)..]);
+        return length;
+    }
+
+    public static int WriteCommand(Span<byte> destination, byte op, ReadOnlySpan<byte> args)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(args.Length, MaxCommandArgBytes, nameof(args));
+        int length = CommandHeaderSize + args.Length;
+        WriteHeader(destination, PacketType.Command, length);
+        destination[2] = op;
+        destination[3] = (byte)args.Length;
+        args.CopyTo(destination[CommandHeaderSize..]);
+        return length;
     }
 
     /// <param name="name">At most <see cref="MaxGameNameBytes"/> bytes; use <see cref="NormalizeGameName"/> to produce it.</param>

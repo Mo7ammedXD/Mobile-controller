@@ -1,5 +1,6 @@
 package com.mobilecontroller.client
 
+import com.mobilecontroller.client.input.GyroFilter
 import com.mobilecontroller.client.input.MotionMath
 import com.mobilecontroller.client.input.StickMath
 import com.mobilecontroller.client.input.TouchRouter
@@ -28,6 +29,9 @@ class ZeroAllocationTest {
     private val rocket = Mode(GameModes.ROCKET)
     private val racing = Mode(GameModes.RACING)
     private val packet = ByteArray(Protocol.INPUT_SIZE)
+    private val statusPacket = ByteArray(Protocol.MAX_STATUS_SIZE)
+    private val deviceName = Protocol.encodeName("Pixel 8")
+    private val profileName = Protocol.encodeName("Football")
     private val status = CharLine(96)
     private var sink = 0
 
@@ -39,12 +43,24 @@ class ZeroAllocationTest {
         fun id(name: String) = layout.indexOf(name).also { check(it >= 0) { name } }
     }
 
+    private val gyro = GyroFilter().apply { accelGain = 1.5f; tightening = 0.05f }
+    private var sensorTime = 0L
+
     init {
-        // Exercise the shaped sticks and the floating cluster too.
+        // Exercise the shaped sticks, every stick option, the minimum press and the floating cluster too.
+        state.minPressNanos = 20_000_000L
         football.router.antiDeadzone[0] = 0.15f
         football.router.sensitivity[0] = 1.3f
         football.router.curve[1] = 1.6f
+        football.router.outerDeadzone[0] = 0.1f
+        football.router.anchor[0] = TouchRouter.ANCHOR_FOLLOW
+        // A smaller edge ring lets the 1.4 r circle below drag the follow stick's centre too.
+        football.router.edgeOnRadius = 1.2f
+        football.router.deadzoneShape[1] = StickMath.DZ_SNAP
         rocket.router.floating = true
+        rocket.router.dpadFourWay = true
+        racing.router.pedalCurve = 1.4f
+        racing.router.deadzoneShape[0] = StickMath.DZ_AXIAL
     }
 
     private val move = football.id("MOVE")
@@ -93,11 +109,21 @@ class ZeroAllocationTest {
         }
         // Sensor thread: gyro aim and tilt steering samples (200 Hz on a phone) into the motion offsets.
         val t = i * 0.005f
-        val aim = MotionMath.aim(0.4f * sin(t), 0.2f * cos(t), 0.1f, 6.9f, 0f, 6.9f, MotionMath.ROTATION_90, 1.2f, 0.2f, false)
+        sensorTime += 5_000_000L
+        if (i % 1000 == 0) gyro.startCalibration(50_000_000L)
+        val aim = gyro.process(0.4f * sin(t), 0.2f * cos(t), 0.1f, 6.9f, 0f, 6.9f, MotionMath.ROTATION_90, sensorTime)
         val steer = MotionMath.steer(8f, 4f * sin(t), 3f, MotionMath.ROTATION_90, 1f, 0.1f)
         state.setMotion(steer, StickMath.unpackX(aim), StickMath.unpackY(aim))
         if (state.dirty || i % 2 == 0) state.snapshot(packet)
+        sink += (state.deadlineNanos and 1L).toInt()
         sink += packet[2].toInt()
+        if (i % 120 == 0) {
+            // Sender thread: the once-per-second STATUS (§12).
+            sink += Protocol.writeStatus(
+                statusPacket, 0x1234L, i % 101, Protocol.STATUS_CHARGING, i % 500, 120, Protocol.OUTPUT_NONE, 3,
+                deviceName, deviceName.size, profileName, profileName.size,
+            )
+        }
         if (i % 30 == 0) {
             // The status line rebuild (UI thread, 4 Hz) shares the no-allocation rule.
             status.clear().append("Connected").append(" · P").append(1 + (i and 3)).append(" · ").append(i % 50).append(" ms")

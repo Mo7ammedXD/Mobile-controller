@@ -7,14 +7,36 @@ import kotlin.math.max
  * The controller state shared between the UI thread (writer) and the sender thread (reader).
  *
  * Digital inputs live in one bit set: bits 0-15 are the XUSB buttons, [LT] and [RT] are the digital
- * triggers, so buttons and triggers share one latching rule. Analog triggers (racing pedals) are kept
- * separately and the wire carries the larger of the two. Every access holds a private monitor:
- * uncontended thin locking costs a few nanoseconds and, unlike copy-on-write snapshots, never allocates.
+ * triggers, so buttons and triggers share one edge rule. The [LOCAL_MASK] bits are phone-only
+ * (e.g. a gyro gate): they are held like buttons but never reach the wire. Analog triggers (racing
+ * pedals) are kept separately and the wire carries the larger of the two. Every access holds a private
+ * monitor: uncontended thin locking costs a few nanoseconds and, unlike copy-on-write snapshots, never
+ * allocates.
+ *
+ * What the fingers hold ([held]) and what goes on the wire ([out]) are separate. Every change of a
+ * wire bit is an edge owed to the PC, and an edge is only applied once the previous state has been in
+ * at least one packet (so a tap between two sends still arrives, §3.4) and has lasted [minPressNanos]
+ * (so a game that polls once per frame sees the tap, and a lost datagram is repaired by the next
+ * one). Edges queue up, so a quick double tap stays two taps; at most three are kept per bit, so
+ * mashing a button never lags behind by more than about three minimum presses.
  */
-class GamepadState {
+class GamepadState(private val clock: Clock = Clock(System::nanoTime)) {
+    /** Time source for the minimum press, replaceable in tests. Same base as [System.nanoTime]. */
+    fun interface Clock {
+        fun nanoTime(): Long
+    }
+
     private val lock = Any()
     private var held = 0
-    private var latched = 0
+    private var out = 0
+
+    // Per wire bit: when its output last changed and how many edges it still owes.
+    private val outSince = LongArray(WIRE_BIT_COUNT) { LONG_AGO }
+    private val pending = IntArray(WIRE_BIT_COUNT)
+    private var pendingMask = 0
+
+    // Wire bits whose current output has been in at least one snapshot since it last changed.
+    private var sentSinceEdge = WIRE_BITS
     private var ltAnalog = 0
     private var rtAnalog = 0
 
@@ -37,13 +59,33 @@ class GamepadState {
     var dirty = false
         private set
 
+    /**
+     * [System.nanoTime] at which an owed edge becomes due ([Long.MAX_VALUE] if none waits for time): the
+     * sender must send then even if nothing else changed. Read without the lock.
+     */
+    @Volatile
+    var deadlineNanos = Long.MAX_VALUE
+        private set
+
+    /** Shortest time a wire bit keeps a state (pressed or released) on the wire; 0 = one packet. */
+    @Volatile
+    var minPressNanos = 0L
+
     /** Sets the bits selected by [mask] to [bits]. Returns true if anything changed. */
     fun setDigital(mask: Int, bits: Int): Boolean = synchronized(lock) {
         val next = (held and mask.inv()) or (bits and mask)
         if (next == held) return false
-        // §3.4: a press must reach the wire even if it is released before the next snapshot.
-        latched = latched or (next and held.inv())
+        var edges = (next xor held) and WIRE_BITS
         held = next
+        while (edges != 0) {
+            val bit = edges and -edges
+            edges = edges xor bit
+            val b = Integer.numberOfTrailingZeros(bit)
+            // Two more edges than the output can show yet cancel out: the bit ends in the same state.
+            pending[b] = if (pending[b] >= MAX_PENDING) pending[b] - 1 else pending[b] + 1
+            if (pending[b] == 0) pendingMask = pendingMask and bit.inv() else pendingMask = pendingMask or bit
+        }
+        advance(clock.nanoTime())
         dirty = true
         true
     }
@@ -89,13 +131,18 @@ class GamepadState {
         true
     }
 
-    /** Digital bits currently held (gyro "only while aiming" reads it). */
+    /** Digital bits the fingers hold right now, local bits included (gyro gates read it). */
     fun heldBits(): Int = synchronized(lock) { held }
 
-    /** Releases everything, including pending latched presses, so the next snapshot is fully neutral. */
+    /** Releases everything, including owed edges, so the next snapshot is fully neutral. */
     fun neutralize() = synchronized(lock) {
         held = 0
-        latched = 0
+        out = 0
+        outSince.fill(LONG_AGO)
+        pending.fill(0)
+        pendingMask = 0
+        sentSinceEdge = WIRE_BITS
+        deadlineNanos = Long.MAX_VALUE
         ltAnalog = 0
         rtAnalog = 0
         ltPeak = 0
@@ -113,24 +160,56 @@ class GamepadState {
     /** §3.3: the sequence restarts at 0 whenever the client creates a socket. */
     fun resetSequence() = synchronized(lock) { seq = 0 }
 
-    /** Encodes the next INPUT into [out] (16 bytes), consuming latched presses and advancing seq. */
-    fun snapshot(out: ByteArray) = synchronized(lock) {
-        val sent = held or latched
+    /** Encodes the next INPUT into [packet] (16 bytes), applying due edges and advancing seq. */
+    fun snapshot(packet: ByteArray) = synchronized(lock) {
+        val now = clock.nanoTime()
+        advance(now)
+        val sent = out
         Protocol.writeInput(
-            out, seq, sent,
+            packet, seq, sent,
             if ((sent and LT) != 0) TRIGGER_MAX else max(ltAnalog, ltPeak),
             if ((sent and RT) != 0) TRIGGER_MAX else max(rtAnalog, rtPeak),
             axis(lx + motionLx), ly, axis(rx + motionRx), axis(ry + motionRy),
         )
         seq = (seq + 1) and 0xFFFF
-        // A latched press (or pedal peak) that is already released still owes the server a release
-        // packet; staying dirty makes the sender emit it after the 2 ms spacing instead of waiting for
-        // the heartbeat.
-        dirty = (latched and held.inv()) != 0 || ltPeak > ltAnalog || rtPeak > rtAnalog
-        latched = 0
+        sentSinceEdge = WIRE_BITS
+        // An edge that only waited for this packet (a tap released before it, or a pedal peak) is owed
+        // now: staying dirty makes the sender emit it after the 2 ms spacing instead of waiting for the
+        // heartbeat. Edges that wait for the minimum press are covered by deadlineNanos instead.
+        dirty = advance(now) || ltPeak > ltAnalog || rtPeak > rtAnalog
         // Peaks only cover values set after this snapshot; the current value is sent anyway.
         ltPeak = 0
         rtPeak = 0
+    }
+
+    /**
+     * Applies every owed edge that is allowed now (at most one per bit: the new state must reach the wire
+     * before the next edge), and recomputes [deadlineNanos]. Returns true if the output changed.
+     */
+    private fun advance(now: Long): Boolean {
+        var changed = false
+        var deadline = Long.MAX_VALUE
+        val min = minPressNanos
+        var p = pendingMask
+        while (p != 0) {
+            val bit = p and -p
+            p = p xor bit
+            // Not on the wire yet: the next snapshot frees it, and dirty already asks for one.
+            if ((sentSinceEdge and bit) == 0) continue
+            val b = Integer.numberOfTrailingZeros(bit)
+            val due = outSince[b] + min
+            if (now < due) {
+                if (due < deadline) deadline = due
+                continue
+            }
+            out = out xor bit
+            outSince[b] = now
+            sentSinceEdge = sentSinceEdge and bit.inv()
+            if (--pending[b] == 0) pendingMask = pendingMask and bit.inv()
+            changed = true
+        }
+        deadlineNanos = deadline
+        return changed
     }
 
     private fun axis(v: Int): Int = if (v > AXIS_MAX) AXIS_MAX else if (v < -AXIS_MAX) -AXIS_MAX else v
@@ -140,5 +219,17 @@ class GamepadState {
         const val LT = 1 shl 16
         const val RT = 1 shl 17
         const val TRIGGER_MAX = 255
+
+        /** Phone-only actions (e.g. a gyro gate): held and read like buttons, never sent. */
+        const val LOCAL_BIT_SHIFT = 20
+        const val LOCAL_MASK = -1 shl LOCAL_BIT_SHIFT
+
+        private const val WIRE_BIT_COUNT = 18
+        private const val WIRE_BITS = (1 shl WIRE_BIT_COUNT) - 1
+        // A double tap owes three edges once its first press is out (release, press, release).
+        private const val MAX_PENDING = 3
+
+        // Far enough back that the first edge is never held up, without overflowing `+ minPressNanos`.
+        private const val LONG_AGO = Long.MIN_VALUE / 4
     }
 }

@@ -349,7 +349,8 @@ public sealed class ServerLoopTests
                      "A5 11 00 00 00 00 00 00 00 00 00 00 00 00 00",     // R1
                      "A5 21 00 00 00 00 00 00 00 00 00 00 00 00 00 00",  // R2
                      "A4 11 00 00 00 00 00 00 00 00 00 00 00 00 00 00",  // R3
-                     "A5 15 00 00",                                      // R4
+                     "A5 16 00 00",                                      // R4
+                     "A5 15 00 00",                                      // RS1: STATUS too short
                      "A5 19 FF 40 00 01 34 12",                          // R5
                      "A5 13 00",                                         // R6
                      "A5 1B 10 72 6F 63 6B 65 74 6C 65 61 67 75 65 2E 65 78 65", // P8: GAME is server → client only
@@ -389,6 +390,71 @@ public sealed class ServerLoopTests
         client.SendInput(2, Sample);
         h.PumpDatagrams();
         Assert.Single(h.Factory.Pads);
+    }
+
+    [Fact]
+    public void Refused_plug_in_for_one_phone_does_not_block_another()
+    {
+        using var h = new ServerHarness(ServerHarness.Quiet with { ConnectRetryMs = 60_000 });
+        using var first = h.Connect();
+        using var second = h.Connect();
+
+        h.Factory.Fail = true;
+        first.SendInput(0, Sample);
+        h.PumpDatagrams();
+        Assert.Empty(h.Factory.Pads);
+
+        // The driver recovered: the other phone connects at once, the first one keeps backing off.
+        h.Factory.Fail = false;
+        second.SendInput(0, Other);
+        h.PumpDatagrams();
+        Assert.Single(h.Factory.Pads);
+        first.SendInput(1, Sample);
+        h.PumpDatagrams();
+        Assert.Single(h.Factory.Pads);
+    }
+
+    [Fact]
+    public void Repeated_plug_in_failures_pause_every_plug_in()
+    {
+        using var h = new ServerHarness(ServerHarness.Quiet with { ConnectRetryMs = 60_000 });
+        var clients = Enumerable.Range(0, 4).Select(_ => h.Connect()).ToList();
+        try
+        {
+            h.Factory.Fail = true;
+            for (int i = 0; i < 3; i++)
+            {
+                clients[i].SendInput(0, Sample);
+                h.PumpDatagrams();
+            }
+            Assert.Contains("3 failures in a row: pausing every plug-in", h.LogText.ToString());
+
+            // Even a new phone waits while the breaker is open, so a broken driver is not hammered.
+            h.Factory.Fail = false;
+            clients[3].SendInput(0, Sample);
+            h.PumpDatagrams();
+            Assert.Empty(h.Factory.Pads);
+        }
+        finally
+        {
+            clients.ForEach(c => c.Dispose());
+        }
+    }
+
+    [Fact]
+    public void Dry_run_logs_every_phone_even_when_one_is_busy()
+    {
+        using var h = new ServerHarness(dryRun: true);
+        using var busy = h.Connect();
+        using var quiet = h.Connect();
+
+        busy.SendInput(1, Sample);
+        quiet.SendInput(1, Other);
+        h.PumpDatagrams(2);
+
+        string log = h.LogText.ToString();
+        Assert.Contains("INPUT seq=1 btn=0x1001", log);
+        Assert.Contains("INPUT seq=1 btn=0x2000", log);
     }
 
     [Fact]

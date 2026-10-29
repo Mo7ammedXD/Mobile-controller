@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The desktop app: a WPF front end that starts, watches and configures MobileController.Server (a separate process, so
+       the server's allocation-free receive loop never shares a garbage collector with a UI). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWPF>true</UseWPF>
+    <!-- Only for the notification-area icon (NotifyIcon). -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <AssemblyName>MobileController</AssemblyName>
+    <RootNamespace>MobileController.Desktop</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>Mobile Controller</Product>
+    <Description>Desktop app for the Mobile Controller server: status, diagnostics and settings.</Description>
+    <!-- WPF's Fluent theme (Application.ThemeMode) is still marked experimental. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+    <!-- Required by the LibraryImport source generator (job object). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WinForms and WPF both define Application, MessageBox, Color...: only WPF's are imported implicitly. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MobileController.Control\MobileController.Control.csproj" />
+    <!-- The server runs as a separate process, from next to this app: build it and copy it alongside. -->
+    <ProjectReference Include="..\MobileController.Server\MobileController.Server.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\scripts\Add-FirewallRule.ps1" Link="Add-FirewallRule.ps1" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MobileController.Desktop.Tests" />
+  </ItemGroup>
+
+</Project>

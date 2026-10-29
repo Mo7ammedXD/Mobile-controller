@@ -48,7 +48,32 @@ class UdpLink(
         fun onGame(mode: GameMode)
     }
 
+    /** Told (on the receiver thread) when the PC's user asks this phone to identify itself (§13). */
+    fun interface IdentifyListener {
+        fun onIdentify(durationMs: Int)
+    }
+
     @Volatile var gameListener: GameListener? = null
+    @Volatile var identifyListener: IdentifyListener? = null
+
+    // §12 STATUS: who this phone is and how it is doing. Written by the UI thread, sent by the sender.
+    @Volatile private var deviceId = 0L
+    @Volatile private var deviceName = ByteArray(0)
+    @Volatile private var profileName = ByteArray(0)
+    @Volatile private var appVersion = 0
+    @Volatile private var battery = Protocol.BATTERY_UNKNOWN
+    @Volatile private var statusFlags = 0
+    @Volatile private var outputPreference = Protocol.OUTPUT_NONE
+    @Volatile private var statusDirty = false
+
+    /** The current server answered a STATUS: it moves our slot when the socket changes, so BYE is not needed then. */
+    @Volatile private var serverKnowsStatus = false
+
+    /** A FEEDBACK with STATUS_ACK arrived on the current socket: the burst of first STATUS packets can stop. */
+    @Volatile private var statusAckedOnSocket = false
+
+    private var lastIdentifyToken = -1
+    private var lastIdentifyNanos = NEVER
 
     /** The last detected game's mode, so a repeated GAME (every 2 s) does not re-trigger a switch. */
     @Volatile private var detectedMode: GameMode? = null
@@ -83,6 +108,8 @@ class UdpLink(
     private val pingPacket = DatagramPacket(pingBuffer, pingBuffer.size)
     private val byeBuffer = ByteArray(Protocol.BYE_SIZE).also(Protocol::writeBye)
     private val byePacket = DatagramPacket(byeBuffer, byeBuffer.size)
+    private val statusBuffer = ByteArray(Protocol.MAX_STATUS_SIZE)
+    private val statusPacket = DatagramPacket(statusBuffer, statusBuffer.size)
     private var nextPingId = 0
     @Volatile private var lastPingId = 0
     private val pingSentAt = AtomicLongArray(PING_SLOTS)
@@ -113,6 +140,7 @@ class UdpLink(
             portUnreachableNanos = NEVER
             rttMicros = -1
             error = 0
+            serverKnowsStatus = false
             targetGeneration++
         }
         setRate(rateHz)
@@ -140,6 +168,50 @@ class UdpLink(
 
     /** The UI changed [state]: send now instead of at the next heartbeat. Allocation-free. */
     fun wake() = LockSupport.unpark(sender)
+
+    /** §12: this install's id (never 0), the phone's name and the app's build number. UI thread, at start-up. */
+    fun setIdentity(deviceId: Long, deviceName: String, appVersion: Int) {
+        this.deviceId = deviceId
+        this.deviceName = Protocol.encodeName(deviceName)
+        this.appVersion = appVersion
+        statusChanged()
+    }
+
+    /** The active layout's name, shown on the PC. */
+    fun setProfileName(name: String) {
+        val encoded = Protocol.encodeName(name)
+        if (encoded.contentEquals(profileName)) return
+        profileName = encoded
+        statusChanged()
+    }
+
+    fun setBattery(percent: Int, charging: Boolean) {
+        val flags = if (charging) statusFlags or Protocol.STATUS_CHARGING else statusFlags and Protocol.STATUS_CHARGING.inv()
+        if (percent == battery && flags == statusFlags) return
+        battery = percent
+        statusFlags = flags
+        statusChanged()
+    }
+
+    /** [Protocol.STATUS_MENU_OPEN] / [Protocol.STATUS_MOTION_ACTIVE] on or off. */
+    fun setStatusFlag(flag: Int, on: Boolean) {
+        val flags = if (on) statusFlags or flag else statusFlags and flag.inv()
+        if (flags == statusFlags) return
+        statusFlags = flags
+        statusChanged()
+    }
+
+    /** Which pad the phone asks the PC for ([Protocol.OUTPUT_NONE], [Protocol.OUTPUT_XBOX360], [Protocol.OUTPUT_DS4]). */
+    fun setOutputPreference(output: Int) {
+        if (output == outputPreference) return
+        outputPreference = output
+        statusChanged()
+    }
+
+    private fun statusChanged() {
+        statusDirty = true
+        LockSupport.unpark(sender)
+    }
 
     /**
      * §3.4 pause: the sender emits one neutral INPUT, then goes silent. The socket stays open so a quick
@@ -185,6 +257,10 @@ class UdpLink(
         var retryAt = 0L
         var backoff = MIN_BACKOFF_NANOS
         var neutralSent = true
+        var openedAt = 0L
+        var nextStatus = Long.MAX_VALUE
+        var lastStatus = 0L
+        var statusBurst = 0
         while (!closed) {
             if (paused) {
                 if (!neutralSent) {
@@ -222,8 +298,27 @@ class UdpLink(
                 lastInput = now - periodNanos
                 nextPing = now
                 nextRouteCheck = now + ROUTE_CHECK_NANOS
+                // §12: STATUS goes out before the first INPUT, so the PC knows who this is before it plugs a pad (or
+                // moves this phone's old controller to the new socket), and twice more in case it is lost.
+                openedAt = now
+                statusBurst = 2
+                lastStatus = now
+                nextStatus = now + STATUS_BURST_1_NANOS
+                sendStatus(s)
             }
-            if (state.dirty || now - lastInput >= periodNanos) {
+            if (now >= nextStatus || (statusDirty && now - lastStatus >= STATUS_MIN_SPACING_NANOS)) {
+                sendStatus(s)
+                lastStatus = now
+                nextStatus = if (statusBurst == 2 && !statusAckedOnSocket) {
+                    statusBurst = 1
+                    openedAt + STATUS_BURST_2_NANOS
+                } else {
+                    statusBurst = 0
+                    now + STATUS_INTERVAL_NANOS
+                }
+            }
+            // The deadline is a held-back edge of the minimum press (a quick tap's release) falling due.
+            if (state.dirty || now >= state.deadlineNanos || now - lastInput >= periodNanos) {
                 // §3.4: changes are coalesced to at most one INPUT per 2 ms.
                 val wait = lastInput + MIN_SPACING_NANOS - now
                 if (wait > 0) {
@@ -249,11 +344,14 @@ class UdpLink(
                 // fell back to the default network). Allocates, but only while disconnected.
                 if (now - lastFeedbackNanos >= CONNECTED_NANOS && routeChanged()) {
                     Log.i(LOG_TAG, "route to PC changed, reopening socket")
-                    closeSocket(s, bye = true)
+                    // A server that knows STATUS moves our controller to the new socket; BYE would unplug it first.
+                    closeSocket(s, bye = !serverKnowsStatus)
                     continue
                 }
             }
-            val sleep = min(lastInput + periodNanos, min(nextPing, nextRouteCheck)) - System.nanoTime()
+            var wakeAt = min(min(lastInput + periodNanos, state.deadlineNanos), min(nextPing, nextRouteCheck))
+            wakeAt = min(wakeAt, if (statusDirty) lastStatus + STATUS_MIN_SPACING_NANOS else nextStatus)
+            val sleep = wakeAt - System.nanoTime()
             if (sleep > 0 && !state.dirty) LockSupport.parkNanos(this, sleep)
         }
         socket?.let { closeSocket(it, bye = true) }
@@ -296,7 +394,12 @@ class UdpLink(
         when (Protocol.validate(b, length, serverToClient = true)) {
             Protocol.TYPE_FEEDBACK -> {
                 playerIndex = Protocol.u8(b, Protocol.FEEDBACK_PLAYER)
-                feedbackFlags = Protocol.u8(b, Protocol.FEEDBACK_FLAGS)
+                val flags = Protocol.u8(b, Protocol.FEEDBACK_FLAGS)
+                feedbackFlags = flags
+                if ((flags and Protocol.FLAG_STATUS_ACK) != 0) {
+                    serverKnowsStatus = true
+                    statusAckedOnSocket = true
+                }
                 lastAcceptedSeq = Protocol.u16(b, Protocol.FEEDBACK_LAST_SEQ)
                 lastFeedbackNanos = System.nanoTime()
                 if (paused) {
@@ -322,7 +425,35 @@ class UdpLink(
                     gameListener?.onGame(mode)
                 }
             }
+            Protocol.TYPE_COMMAND -> {
+                // §13: unknown ops, and known ops with other argument lengths, are ignored.
+                if (Protocol.u8(b, Protocol.COMMAND_OP) != Protocol.COMMAND_IDENTIFY || Protocol.u8(b, Protocol.COMMAND_ARG_LENGTH) != 2) return
+                val token = Protocol.u8(b, Protocol.COMMAND_ARGS)
+                val now = System.nanoTime()
+                // The PC sends it three times; act once.
+                if (token == lastIdentifyToken && now - lastIdentifyNanos < IDENTIFY_REPEAT_NANOS) return
+                lastIdentifyToken = token
+                lastIdentifyNanos = now
+                val tenths = Protocol.u8(b, Protocol.COMMAND_ARGS + 1)
+                identifyListener?.onIdentify(if (tenths == 0) DEFAULT_IDENTIFY_MS else tenths * 100)
+            }
         }
+    }
+
+    /** Encodes and sends the current STATUS. Sender thread; allocation-free. */
+    private fun sendStatus(s: DatagramSocket) {
+        val id = deviceId
+        statusDirty = false
+        if (id == 0L) return
+        val rtt = rttMicros
+        val tenths = if (rtt < 0) Protocol.RTT_UNKNOWN else min(rtt / 100, Protocol.RTT_UNKNOWN - 1)
+        val name = deviceName
+        val profile = profileName
+        statusPacket.length = Protocol.writeStatus(
+            statusBuffer, id, battery, statusFlags, tenths, rateHz, outputPreference, appVersion,
+            name, name.size, profile, profile.size,
+        )
+        transmit(s, statusPacket)
     }
 
     private fun sendPing(s: DatagramSocket, now: Long) {
@@ -383,6 +514,8 @@ class UdpLink(
             inputPacket.socketAddress = target
             pingPacket.socketAddress = target
             byePacket.socketAddress = target
+            statusPacket.socketAddress = target
+            statusAckedOnSocket = false
             boundNetwork = network
             serverAddress = address
             state.resetSequence()
@@ -522,5 +655,16 @@ class UdpLink(
         private const val RECEIVE_BUFFER = Protocol.MAX_DATAGRAM + 1
         private const val PING_SLOTS = 16
         private const val DSCP_EF = 0xB8
+
+        // §12 STATUS send policy: on open, at +30 ms and +100 ms until acknowledged, then every second, and on
+        // change at most every 100 ms.
+        private const val STATUS_BURST_1_NANOS = 30_000_000L
+        private const val STATUS_BURST_2_NANOS = 100_000_000L
+        private const val STATUS_INTERVAL_NANOS = NANOS_PER_SECOND
+        private const val STATUS_MIN_SPACING_NANOS = 100_000_000L
+
+        // §13 IDENTIFY.
+        private const val IDENTIFY_REPEAT_NANOS = 5 * NANOS_PER_SECOND
+        private const val DEFAULT_IDENTIFY_MS = 3000
     }
 }

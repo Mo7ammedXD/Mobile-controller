@@ -22,13 +22,16 @@ internal sealed class PadSlot
     private int _lastSeq;
     private int _feedback; // largeMotor | smallMotor << 8 | led << 16 | FeedbackKnown
     private volatile bool _closed;
+    private volatile SocketAddress _address;
+    private volatile bool _supportsStatus;
 
     public PadSlot(int index, SocketAddress address, long now)
     {
         Index = index;
-        Address = address;
+        _address = address;
         Key = KeyOf(address);
         EndPoint = (IPEndPoint)new IPEndPoint(IPAddress.Any, 0).Create(address);
+        Connected = now;
         LastSeen = now;
         LastAccepted = now;
         NextFeedback = now;
@@ -37,13 +40,78 @@ internal sealed class PadSlot
     public int Index { get; }
 
     /// <summary>Family, port and IPv4 address of the sockaddr_in: enough to identify an endpoint in one compare.</summary>
-    public ulong Key { get; }
+    public ulong Key { get; private set; }
 
-    /// <summary>Private copy of the client's address, used for every reply.</summary>
-    public SocketAddress Address { get; }
+    /// <summary>Private copy of the client's address, used for every reply (also from the driver thread).</summary>
+    public SocketAddress Address => _address;
 
-    public IPEndPoint EndPoint { get; }
+    public IPEndPoint EndPoint { get; private set; }
     public IVirtualPad? Pad { get; set; }
+
+    /// <summary>When the slot was created (Stopwatch ticks).</summary>
+    public long Connected { get; }
+
+    /// <summary>The flags every FEEDBACK of this slot carries: PAD_ATTACHED or DRY_RUN, and TARGET_DS4.</summary>
+    public FeedbackFlags BaseFlags { get; set; }
+
+    /// <summary>The kind of pad this slot has (or, in a dry run, would have).</summary>
+    public PadKind Kind { get; set; }
+
+    public SlotMetrics Metrics { get; } = new();
+
+    // --- STATUS (§12). Receive thread, except SupportsStatus. ---------------------------------------------------
+
+    /// <summary>The client sent STATUS: its FEEDBACK carries STATUS_ACK, and it understands COMMAND.</summary>
+    public bool SupportsStatus => _supportsStatus;
+
+    public ulong DeviceId { get; private set; }
+    public byte Battery { get; private set; } = Protocol.UnknownBattery;
+    public StatusFlags StatusFlags { get; private set; }
+    public ushort RttTenthsMs { get; private set; } = Protocol.UnknownRtt;
+    public byte RateHz { get; private set; }
+    public OutputPreference OutputPreference { get; private set; }
+    public ushort AppVersion { get; private set; }
+    public long LastStatus { get; private set; }
+
+    /// <summary>UTF-8 device and profile names from STATUS (the first <see cref="DeviceNameLength"/> / <see cref="ProfileNameLength"/> bytes).</summary>
+    public byte[] DeviceName { get; } = new byte[Protocol.MaxStatusFieldBytes];
+    public int DeviceNameLength { get; private set; }
+    public byte[] ProfileName { get; } = new byte[Protocol.MaxStatusFieldBytes];
+    public int ProfileNameLength { get; private set; }
+
+    /// <summary>Copies a STATUS into the slot. Returns true when it was the client's first.</summary>
+    public bool ApplyStatus(in StatusView status, long now)
+    {
+        bool first = !_supportsStatus;
+        DeviceId = status.DeviceId;
+        Battery = status.Battery;
+        StatusFlags = status.Flags;
+        RttTenthsMs = status.RttTenthsMs;
+        RateHz = status.RateHz;
+        OutputPreference = status.Output;
+        AppVersion = status.AppVersion;
+        LastStatus = now;
+        status.DeviceName.CopyTo(DeviceName);
+        DeviceNameLength = status.DeviceName.Length;
+        status.ProfileName.CopyTo(ProfileName);
+        ProfileNameLength = status.ProfileName.Length;
+        _supportsStatus = true;
+        return first;
+    }
+
+    /// <summary>
+    /// The same phone now sends from <paramref name="address"/> (a new socket after a network change): the slot, and
+    /// with it the virtual pad, moves there. The new socket restarts its sequence numbers (§3.3 rule 1).
+    /// </summary>
+    public void Rebind(SocketAddress address, long now)
+    {
+        Key = KeyOf(address);
+        EndPoint = (IPEndPoint)new IPEndPoint(IPAddress.Any, 0).Create(address);
+        _address = address;
+        _hasAccepted = false;
+        LastSeen = now;
+        Metrics.OnPause();
+    }
 
     public long LastSeen { get; set; }
     public long LastAccepted { get; private set; }
@@ -52,6 +120,48 @@ internal sealed class PadSlot
     /// <summary>The GAME datagram this client got last; the detector publishes a new array per change, so a reference compare spots it.</summary>
     public byte[]? GameSent { get; set; }
     public long NextGame { get; set; }
+
+    /// <summary>--dry-run: when this client's next decoded packet may be logged (each phone has its own budget).</summary>
+    public long NextDryRunLog { get; set; }
+
+    // Desktop-app commands in progress (receive thread).
+    public PadKind? ReplugTo { get; set; }
+    public byte IdentifyToken { get; set; }
+    public int IdentifyLeft { get; set; }
+    public long NextIdentify { get; set; }
+    public long RumbleTestUntil { get; set; }
+
+    /// <summary>Sets the rumble motors, keeping the player LED. Returns true when anything changed.</summary>
+    public bool SetRumble(byte largeMotor, byte smallMotor)
+    {
+        int old, next;
+        do
+        {
+            old = Volatile.Read(ref _feedback);
+            next = (old & ~0xFFFF) | largeMotor | smallMotor << 8;
+        }
+        while (Interlocked.CompareExchange(ref _feedback, next, old) != old);
+        return next != old;
+    }
+
+    /// <summary>Takes over the STATUS of <paramref name="old"/>, the same phone's previous slot.</summary>
+    public void CopyStatusFrom(PadSlot old)
+    {
+        if (!old.SupportsStatus) return;
+        DeviceId = old.DeviceId;
+        Battery = old.Battery;
+        StatusFlags = old.StatusFlags;
+        RttTenthsMs = old.RttTenthsMs;
+        RateHz = old.RateHz;
+        OutputPreference = old.OutputPreference;
+        AppVersion = old.AppVersion;
+        LastStatus = old.LastStatus;
+        old.DeviceName.AsSpan(0, old.DeviceNameLength).CopyTo(DeviceName);
+        DeviceNameLength = old.DeviceNameLength;
+        old.ProfileName.AsSpan(0, old.ProfileNameLength).CopyTo(ProfileName);
+        ProfileNameLength = old.ProfileNameLength;
+        _supportsStatus = true;
+    }
 
     /// <summary>Neutral state of §4: inputs were released after a silence, the next INPUT is accepted unconditionally.</summary>
     public bool TimedOut { get; private set; }
@@ -81,6 +191,7 @@ internal sealed class PadSlot
         _pending = state;
         _dirty = true;
         Stats.Accepted++;
+        Metrics.OnAccepted(now, seq);
         return verdict;
     }
 
@@ -90,7 +201,11 @@ internal sealed class PadSlot
         TimedOut = true;
         _pending = default;
         _dirty = true;
+        Metrics.OnPause();
     }
+
+    /// <summary>The state last submitted to the pad (what the game sees).</summary>
+    public PadState Submitted => _submitted;
 
     /// <summary>
     /// Returns the newest accepted state when it differs from what the pad last received. Called once after a burst
@@ -120,10 +235,21 @@ internal sealed class PadSlot
     public byte LoggedPlayerIndex { get; set; } = Protocol.UnknownPlayer;
 
     /// <summary>Any thread: serialises this client's FEEDBACK.</summary>
-    public void WriteFeedback(Span<byte> destination, FeedbackFlags flags)
+    public void WriteFeedback(Span<byte> destination)
     {
         int f = Volatile.Read(ref _feedback);
+        var flags = BaseFlags | (_supportsStatus ? FeedbackFlags.StatusAck : FeedbackFlags.None);
         Protocol.WriteFeedback(destination, (byte)f, (byte)(f >> 8), PlayerOf(f), flags, LastSeq);
+    }
+
+    /// <summary>Rumble motors the game set last (0..255 each), for status displays.</summary>
+    public (byte Large, byte Small) Rumble
+    {
+        get
+        {
+            int f = Volatile.Read(ref _feedback);
+            return ((byte)f, (byte)(f >> 8));
+        }
     }
 
     // The wrapper's IXbox360Controller.UserIndex is nothing but the LedNumber of the last notification, so taking it

@@ -13,21 +13,23 @@ internal static class TestPattern
     private static readonly ushort[] ButtonCycle =
         [0x1000, 0x2000, 0x4000, 0x8000, 0x0100, 0x0200, 0x0020, 0x0010, 0x0040, 0x0080, 0x0001, 0x0008, 0x0002, 0x0004];
 
-    public static void Run(IVirtualPadFactory factory, TimeSpan duration, CancellationToken cancellation, Logger log)
+    public static void Run(IVirtualPadFactory factory, PadKind kind, TimeSpan duration, CancellationToken cancellation, Logger log)
     {
         int lastFeedback = -1;
         void OnFeedback(byte large, byte small, byte led)
         {
             int packed = large | small << 8 | led << 16;
             if (Interlocked.Exchange(ref lastFeedback, packed) == packed) return;
-            string player = led <= 3 ? $"XInput player {led + 1}" : "no XInput player assigned yet";
+            string player = kind == PadKind.DualShock4 ? "DualShock 4"
+                : led <= 3 ? $"XInput player {led + 1}" : "no XInput player assigned yet";
             log.Info($"Feedback from Windows: {player}, rumble large={large} small={small}");
         }
 
-        using var pad = CreateWithRetry(factory, OnFeedback, log);
+        using var pad = CreateWithRetry(factory, kind, OnFeedback, log);
 
-        log.Info($"Test pattern running for {duration.TotalSeconds:F0} s: sticks circle, triggers ramp, buttons cycle " +
-                 "(Guide excluded). Watch it in joy.cpl (Win+R, joy.cpl) or a browser gamepad tester. Ctrl+C stops.");
+        log.Info($"Test pattern running for {duration.TotalSeconds:F0} s on a {GamepadServer.Describe(kind)}: sticks circle, " +
+                 "triggers ramp, buttons cycle (Guide excluded). Watch it in joy.cpl (Win+R, joy.cpl) or a browser gamepad " +
+                 "tester. Ctrl+C stops.");
 
         long start = Stopwatch.GetTimestamp();
         while (!cancellation.IsCancellationRequested)
@@ -55,13 +57,13 @@ internal static class TestPattern
 
     // Plug-in occasionally fails transiently (seen once on the first plug-in of a session); the server retries on the
     // phone's next packet, the one-shot test pattern retries here.
-    private static IVirtualPad CreateWithRetry(IVirtualPadFactory factory, PadFeedbackHandler onFeedback, Logger log)
+    private static IVirtualPad CreateWithRetry(IVirtualPadFactory factory, PadKind kind, PadFeedbackHandler onFeedback, Logger log)
     {
         for (int attempt = 1; ; attempt++)
         {
             try
             {
-                return factory.Create(onFeedback);
+                return factory.Create(kind, onFeedback);
             }
             catch (Exception e) when (attempt < 3)
             {

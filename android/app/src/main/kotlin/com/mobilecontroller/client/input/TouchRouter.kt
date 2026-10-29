@@ -5,6 +5,7 @@ import com.mobilecontroller.client.protocol.Protocol
 import com.mobilecontroller.client.ui.ControlLayout
 import com.mobilecontroller.client.ui.ControlLayout.Companion.MAX_CONTROLS
 import com.mobilecontroller.client.ui.ControlSpec
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -21,13 +22,42 @@ import kotlin.math.sqrt
  * Every method returns a set of [STATE] / [VISUAL] / [PRESS] / [MENU_TAP] flags describing what changed.
  */
 class TouchRouter(private val layout: ControlLayout, private val state: GamepadState) {
-    /** Stick deadzone as a fraction of the stick radius. */
-    var deadzone = 0.05f
+    /** Stick deadzone (both sticks) as a fraction of the stick radius; see [innerDeadzone] for one stick. */
+    var deadzone: Float
+        get() = innerDeadzone[0]
+        set(value) {
+            innerDeadzone[0] = value
+            innerDeadzone[1] = value
+        }
+
+    // Per stick axis (0 = left stick, 1 = right stick), see the full StickMath.stick.
+    val innerDeadzone = floatArrayOf(0.05f, 0.05f)
+    val outerDeadzone = FloatArray(2)
+    val deadzoneShape = IntArray(2)
+    val invertX = BooleanArray(2)
+    val invertY = BooleanArray(2)
+
+    /** Where a stick's centre is: [ANCHOR_FLOATING], [ANCHOR_FIXED] or [ANCHOR_FOLLOW]. */
+    val anchor = IntArray(2)
 
     /** Output shaping per stick axis (0 = left stick, 1 = right stick), see [StickMath.shape]. */
     val antiDeadzone = FloatArray(2)
     val curve = floatArrayOf(1f, 1f)
     val sensitivity = floatArrayOf(1f, 1f)
+
+    /** D-pad centre deadzone (fraction of its radius), diagonal half-width (radians) and 4-way mode. */
+    var dpadDeadzone = DPAD_DEADZONE
+    var dpadDiagonal = StickMath.DPAD_EQUAL_DIAGONAL
+    var dpadFourWay = false
+
+    /** Edge ring: the edge action starts past [edgeOnRadius] radii and stops inside [edgeOffRadius]. */
+    var edgeOnRadius = EDGE_ON
+    var edgeOffRadius = EDGE_OFF
+
+    /** Pedal response: output at the bottom edge, rise per unit of travel, and its curve exponent. */
+    var pedalMin = PEDAL_MIN
+    var pedalGain = PEDAL_GAIN
+    var pedalCurve = 1f
 
     /**
      * "Buttons follow your thumb": when a thumb lands on (or near) a slide group that no finger holds,
@@ -94,11 +124,18 @@ class TouchRouter(private val layout: ControlLayout, private val state: GamepadS
         pointerOfControl[c] = id
         flags = flags or when (layout.kind[c]) {
             ControlSpec.STICK -> {
-                // Floating stick: centre where the thumb lands, clamped so the whole ring stays inside the
-                // safe area; the first sample is then (near) zero deflection instead of a jump.
-                val r = layout.r[c]
-                stickX[c] = clampTo(px, layout.left + r, layout.right - r)
-                stickY[c] = clampTo(py, layout.top + r, layout.bottom - r)
+                if (anchor[layout.axis[c]] == ANCHOR_FIXED) {
+                    // Fixed stick: the centre is the drawn stick, so where the thumb lands is already a
+                    // deflection (like grabbing a physical stick off-centre).
+                    stickX[c] = layout.x[c]
+                    stickY[c] = layout.y[c]
+                } else {
+                    // Floating stick: centre where the thumb lands, clamped so the whole ring stays inside
+                    // the safe area; the first sample is then (near) zero deflection instead of a jump.
+                    val r = layout.r[c]
+                    stickX[c] = clampTo(px, layout.left + r, layout.right - r)
+                    stickY[c] = clampTo(py, layout.top + r, layout.bottom - r)
+                }
                 updateStick(c, px, py)
             }
             ControlSpec.DPAD -> updateDpad(c, px, py) or VISUAL
@@ -203,9 +240,25 @@ class TouchRouter(private val layout: ControlLayout, private val state: GamepadS
 
     private fun updateStick(c: Int, px: Float, py: Float): Int {
         val r = layout.r[c]
-        val dx = px - stickX[c]
-        val dy = py - stickY[c]
-        val d2 = dx * dx + dy * dy
+        val a = layout.axis[c]
+        var dx = px - stickX[c]
+        var dy = py - stickY[c]
+        var d2 = dx * dx + dy * dy
+        if (anchor[a] == ANCHOR_FOLLOW && d2 > r * r) {
+            // Follow stick: the base is dragged along behind a thumb that runs past the ring, so
+            // reversing direction takes a short move instead of crossing the whole stick. It keeps away
+            // from the edge ring though: a stick with an edge action must still be able to reach it.
+            val reach = if (layout.mask[c] != 0) edgeOnRadius * r * FOLLOW_EDGE_MARGIN else r
+            if (d2 > reach * reach) {
+                val d = sqrt(d2)
+                val k = (d - reach) / d
+                stickX[c] = clampTo(stickX[c] + dx * k, layout.left + r, layout.right - r)
+                stickY[c] = clampTo(stickY[c] + dy * k, layout.top + r, layout.bottom - r)
+                dx = px - stickX[c]
+                dy = py - stickY[c]
+                d2 = dx * dx + dy * dy
+            }
+        }
         if (d2 > r * r) {
             val k = r / sqrt(d2)
             knobX[c] = stickX[c] + dx * k
@@ -214,15 +267,18 @@ class TouchRouter(private val layout: ControlLayout, private val state: GamepadS
             knobX[c] = px
             knobY[c] = py
         }
-        val a = layout.axis[c]
-        val packed = StickMath.stick(dx, dy, r, deadzone, antiDeadzone[a], curve[a], sensitivity[a])
-        val ax = StickMath.unpackX(packed)
-        val ay = StickMath.unpackY(packed)
+        val packed = StickMath.stick(
+            dx, dy, r, innerDeadzone[a], outerDeadzone[a], deadzoneShape[a], antiDeadzone[a], curve[a], sensitivity[a],
+        )
+        var ax = StickMath.unpackX(packed)
+        var ay = StickMath.unpackY(packed)
+        if (invertX[a]) ax = -ax
+        if (invertY[a]) ay = -ay
         val changed = if (a == 0) state.setLeftStick(ax, ay) else state.setRightStick(ax, ay)
         var flags = VISUAL or (if (changed) STATE else 0)
         // Rim tick where the output saturates (earlier than the ring with a high sensitivity), so the
         // thumb feels "full speed" instead of pushing on uselessly.
-        val full = StickMath.fullDeflection(deadzone, sensitivity[a]) * r
+        val full = StickMath.fullDeflection(innerDeadzone[a], outerDeadzone[a], sensitivity[a]) * r
         val rimLimit = if (rimOn[c]) full * RIM_RELEASE else full
         val rim = d2 >= rimLimit * rimLimit
         if (rim != rimOn[c]) {
@@ -232,7 +288,7 @@ class TouchRouter(private val layout: ControlLayout, private val state: GamepadS
         if (layout.mask[c] != 0) {
             // Edge action (e.g. sprint): pushing well past the ring, with hysteresis so a thumb resting
             // on the boundary does not flicker it.
-            val limit = if (edgeOn[c]) EDGE_OFF * r else EDGE_ON * r
+            val limit = if (edgeOn[c]) edgeOffRadius * r else edgeOnRadius * r
             val on = d2 > limit * limit
             if (on != edgeOn[c]) {
                 edgeOn[c] = on
@@ -243,7 +299,7 @@ class TouchRouter(private val layout: ControlLayout, private val state: GamepadS
     }
 
     private fun updateDpad(c: Int, px: Float, py: Float): Int {
-        val bits = StickMath.dpad(px - layout.x[c], py - layout.y[c], layout.r[c], DPAD_DEADZONE)
+        val bits = StickMath.dpad(px - layout.x[c], py - layout.y[c], layout.r[c], dpadDeadzone, dpadDiagonal, dpadFourWay)
         if (bits == dpadBits[c]) return 0
         val pressed = bits and dpadBits[c].inv()
         dpadBits[c] = bits
@@ -253,8 +309,9 @@ class TouchRouter(private val layout: ControlLayout, private val state: GamepadS
     /** Pedal travel: the bottom edge is a light press, the upper part of the pedal is full power. */
     private fun updatePedal(c: Int, py: Float): Int {
         val h = layout.halfH[c]
-        val t = clampTo((layout.y[c] + h - py) / (2 * h), 0f, 1f)
-        val v = (minOf(1f, PEDAL_MIN + t * PEDAL_GAIN) * GamepadState.TRIGGER_MAX).roundToInt()
+        var t = clampTo((layout.y[c] + h - py) / (2 * h), 0f, 1f)
+        if (pedalCurve != 1f) t = t.pow(pedalCurve)
+        val v = (minOf(1f, pedalMin + t * pedalGain) * GamepadState.TRIGGER_MAX).roundToInt()
         if (v == pedalValue[c]) return 0
         pedalValue[c] = v
         return commitTriggers()
@@ -327,6 +384,19 @@ class TouchRouter(private val layout: ControlLayout, private val state: GamepadS
 
         /** The rim tick re-arms once the thumb is back inside this fraction of full deflection. */
         private const val RIM_RELEASE = 0.9f
+
+        /** A follow stick with an edge action stops dragging this far past the ring, inside the edge zone. */
+        private const val FOLLOW_EDGE_MARGIN = 1.1f
+
+        // Stick anchors.
+        /** The centre is where the thumb lands (default): no jump on touch, works without looking. */
+        const val ANCHOR_FLOATING = 0
+
+        /** The centre is the drawn stick: like a physical stick, the landing point is already a deflection. */
+        const val ANCHOR_FIXED = 1
+
+        /** Floating, and the centre is dragged along when the thumb runs past the ring. */
+        const val ANCHOR_FOLLOW = 2
 
         private const val ALL_DIGITAL = Protocol.BUTTON_MASK or GamepadState.LT or GamepadState.RT
 

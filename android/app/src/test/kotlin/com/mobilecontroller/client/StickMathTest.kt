@@ -90,6 +90,78 @@ class StickMathTest {
         }
     }
 
+    private fun full(dx: Float, dy: Float, inner: Float, outer: Float, shape: Int) =
+        StickMath.stick(dx, dy, r, inner, outer, shape, 0f, 1f, 1f)
+
+    @Test
+    fun outerDeadzoneSaturatesBeforeTheRim() {
+        assertEquals(32767, x(full(0.8f * r, 0f, 0.05f, 0.2f, StickMath.DZ_RADIAL)))
+        // The live band is rescaled: half-way through it is half output.
+        assertEquals(16384.0, x(full(0.425f * r, 0f, 0.05f, 0.2f, StickMath.DZ_RADIAL)).toDouble(), 2.0)
+        assertEquals(0.8f, StickMath.fullDeflection(0.05f, 0.2f, 1f), 1e-6f)
+        // No outer band and the old overload agree.
+        assertEquals(StickMath.stick(0.3f * r, -0.2f * r, r, 0.05f), full(0.3f * r, -0.2f * r, 0.05f, 0f, StickMath.DZ_RADIAL))
+    }
+
+    @Test
+    fun axialDeadzoneSendsPureDirections() {
+        // Mostly up, a little right: the radial stick sends both, the axial one only up.
+        val radial = full(0.08f * r, -0.9f * r, 0.1f, 0f, StickMath.DZ_RADIAL)
+        val axial = full(0.08f * r, -0.9f * r, 0.1f, 0f, StickMath.DZ_AXIAL)
+        assertTrue(x(radial) > 0)
+        assertEquals(0, x(axial))
+        assertTrue(y(axial) > 28000)
+        // Each axis inside its own deadzone: nothing at all.
+        assertEquals(0, full(0.09f * r, -0.09f * r, 0.1f, 0f, StickMath.DZ_AXIAL))
+        // Still clamped to the circle on a diagonal.
+        val diagonal = full(r, -r, 0.1f, 0f, StickMath.DZ_AXIAL)
+        assertEquals(23170.0, x(diagonal).toDouble(), 2.0)
+    }
+
+    @Test
+    fun snapPullsNearAxisDirectionsOntoTheAxis() {
+        val a = Math.toRadians(8.0)
+        val near = full((r * sin(a)).toFloat(), (-r * cos(a)).toFloat(), 0.05f, 0f, StickMath.DZ_SNAP)
+        assertEquals(0, x(near))
+        assertEquals(32767, y(near))
+        // A real diagonal keeps its direction.
+        val b = Math.toRadians(30.0)
+        val diagonal = full((r * sin(b)).toFloat(), (-r * cos(b)).toFloat(), 0.05f, 0f, StickMath.DZ_SNAP)
+        assertEquals(0.577, x(diagonal).toDouble() / y(diagonal), 0.01)
+    }
+
+    @Test
+    fun configurableDpadMatchesTheEqualSectorsByDefault() {
+        var a = 0.0
+        while (a < 2 * Math.PI) {
+            val dx = (r * cos(a)).toFloat()
+            val dy = (-r * sin(a)).toFloat()
+            assertEquals(
+                "angle ${Math.toDegrees(a)}",
+                StickMath.dpad(dx, dy, r, 0.25f),
+                StickMath.dpad(dx, dy, r, 0.25f, StickMath.DPAD_EQUAL_DIAGONAL, fourWay = false),
+            )
+            a += 0.013
+        }
+    }
+
+    @Test
+    fun dpadDiagonalWidthAndFourWay() {
+        // 20° above right: right with equal sectors (diagonals span 22.5°..67.5°)...
+        val a = Math.toRadians(20.0)
+        val dx = (r * cos(a)).toFloat()
+        val dy = (-r * sin(a)).toFloat()
+        assertEquals(Protocol.DPAD_RIGHT, StickMath.dpad(dx, dy, r, 0.25f, StickMath.DPAD_EQUAL_DIAGONAL, false))
+        // ...but wider diagonals (30° either side of 45°, so 15°..75°) catch it.
+        val wide = Math.toRadians(30.0).toFloat()
+        assertEquals(Protocol.DPAD_UP or Protocol.DPAD_RIGHT, StickMath.dpad(dx, dy, r, 0.25f, wide, false))
+        // Four-way never presses two directions, even exactly on a diagonal.
+        val d = (r * cos(Math.PI / 4)).toFloat()
+        val bits = StickMath.dpad(d * 1.01f, -d, r, 0.25f, wide, true)
+        assertTrue(bits == Protocol.DPAD_UP || bits == Protocol.DPAD_RIGHT)
+        assertEquals(Protocol.DPAD_LEFT, StickMath.dpad(-r, 0.1f * r, r, 0.25f, wide, true))
+    }
+
     @Test
     fun dpadEightSectorsAndCentre() {
         val up = Protocol.DPAD_UP

@@ -1,0 +1,126 @@
+<UserControl x:Class="MobileController.Desktop.Views.DashboardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="20,4,20,20" MaxWidth="1000" HorizontalAlignment="Stretch">
+            <TextBlock Text="Dashboard" Style="{StaticResource PageTitle}" />
+            <TextBlock Style="{StaticResource PageIntro}"
+                       Text="Mobile Controller turns phones into game controllers for this PC. This page shows whether everything is ready, and which phones are playing." />
+
+            <!-- Setup checklist: shown until everything is fine and the user hid it. -->
+            <Border Style="{StaticResource Card}" Visibility="{Binding ShowSetup, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <DockPanel LastChildFill="True">
+                        <Button DockPanel.Dock="Right" Content="Hide" Command="{Binding DismissSetupCommand}" Padding="12,4" />
+                        <Button DockPanel.Dock="Right" Content="Check again" Command="{Binding RunChecksCommand}" Padding="12,4" Margin="0,0,8,0" />
+                        <TextBlock Text="Setup checklist" Style="{StaticResource SectionTitle}" VerticalAlignment="Center" Margin="0" />
+                    </DockPanel>
+                    <ItemsControl ItemsSource="{Binding Checklist}" Margin="0,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Style="{StaticResource Glyph}" FontSize="20" Margin="0,0,14,0" VerticalAlignment="Top"
+                                               Text="{Binding Level, Converter={StaticResource LevelToGlyph}}"
+                                               Foreground="{Binding Level, Converter={StaticResource LevelToBrush}}" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}" FontSize="13" />
+                                    </StackPanel>
+                                    <Button Grid.Column="2" Content="{Binding ActionText}" Command="{Binding Action}" Padding="12,4"
+                                            VerticalAlignment="Center" Margin="12,0,0,0"
+                                            Visibility="{Binding ActionText, Converter={StaticResource NotNullToVisibility}}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- At a glance. -->
+            <UniformGrid Columns="3" Margin="0,0,0,0">
+                <Border Style="{StaticResource Card}" Margin="0,0,12,12">
+                    <StackPanel>
+                        <TextBlock Text="Server" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="State" Style="{StaticResource MetricLabel}" />
+                        <TextBlock Text="{Binding Server.State}" Style="{StaticResource MetricValue}" />
+                        <TextBlock Text="Running for" Style="{StaticResource MetricLabel}" Margin="0,10,0,2" />
+                        <TextBlock Text="{Binding UptimeText}" Style="{StaticResource MetricValue}" />
+                        <TextBlock Text="{Binding ServerName, StringFormat=Phones see it as {0}}" Style="{StaticResource Caption}" Margin="0,10,0,10" />
+                        <Button Content="Restart server" Command="{Binding RestartServerCommand}" HorizontalAlignment="Left" Padding="12,4" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource Card}" Margin="0,0,12,12">
+                    <StackPanel>
+                        <TextBlock Text="Controllers" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="Connected" Style="{StaticResource MetricLabel}" />
+                        <TextBlock Style="{StaticResource MetricValue}">
+                            <Run Text="{Binding Pads.Count, Mode=OneWay}" /><Run Text=" of " /><Run Text="{Binding Hello.MaxPads, Mode=OneWay, FallbackValue=4}" />
+                        </TextBlock>
+                        <TextBlock Text="Default type" Style="{StaticResource MetricLabel}" Margin="0,10,0,2" />
+                        <TextBlock Text="{Binding Hello.DefaultOutput, FallbackValue=xbox360}" Style="{StaticResource MetricValue}" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
+                                   Text="XInput games see up to 4 controllers. Each phone can be an Xbox 360 controller or a DualShock 4." />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="Connect" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="Address" Style="{StaticResource MetricLabel}" />
+                        <TextBlock Text="{Binding Pairing.Address, FallbackValue=No network}" Style="{StaticResource MetricValue}" />
+                        <TextBlock Text="Port" Style="{StaticResource MetricLabel}" Margin="0,10,0,2" />
+                        <TextBlock Text="{Binding Port}" Style="{StaticResource MetricValue}" />
+                        <TextBlock Text="{Binding Pairing.Hint}" Style="{StaticResource Caption}" Margin="0,10,0,10" />
+                        <Button Content="Copy address" Command="{Binding CopyTextCommand}" CommandParameter="{Binding Pairing.Address}"
+                                HorizontalAlignment="Left" Padding="12,4" />
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+
+            <!-- The phones, in one line each. -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Phones" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource Caption}" FontSize="13"
+                               Visibility="{Binding Pads.Count, Converter={StaticResource ZeroToVisibility}}"
+                               Text="No phone is connected. Open Mobile Controller on a phone on the same network and tap Find PC; the Connect page has a code to scan." />
+                    <ItemsControl ItemsSource="{Binding Pads}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE8EA;" FontSize="20" Margin="0,0,12,0" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Caption}" />
+                                    </StackPanel>
+                                    <Border Grid.Column="2" Style="{StaticResource Badge}">
+                                        <TextBlock Text="{Binding Quality, StringFormat={}{0} link}" FontSize="12" />
+                                    </Border>
+                                    <Border Grid.Column="3" Style="{StaticResource Badge}">
+                                        <TextBlock Text="{Binding LatencyText}" FontSize="12" />
+                                    </Border>
+                                    <Border Grid.Column="4" Style="{StaticResource Badge}">
+                                        <TextBlock FontSize="12">
+                                            <Run Text="&#xE83F;" FontFamily="{StaticResource IconFont}" /><Run Text=" " /><Run Text="{Binding BatteryText, Mode=OneWay}" />
+                                        </TextBlock>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

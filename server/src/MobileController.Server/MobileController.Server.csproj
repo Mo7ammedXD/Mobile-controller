@@ -6,13 +6,8 @@
     <!-- Nefarius.ViGEm.Client embeds vigemclient.dll for x86/x64 only. Pinning x64 also makes the app run
          (emulated) on Windows on ARM instead of failing to load the native client in an ARM64 process. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <InvariantGlobalization>true</InvariantGlobalization>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- Required by the LibraryImport source generator. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <!-- The steady state allocates nothing, so a background GC thread buys nothing. -->
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <Version>1.0.0</Version>
@@ -22,6 +17,10 @@
 
   <ItemGroup>
     <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MobileController.Control\MobileController.Control.csproj" />
   </ItemGroup>
 
   <ItemGroup>

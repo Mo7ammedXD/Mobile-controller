@@ -1,8 +1,11 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/MobileController.Control/MobileController.Control.csproj" />
+    <Project Path="src/MobileController.Desktop/MobileController.Desktop.csproj" />
     <Project Path="src/MobileController.Server/MobileController.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/MobileController.Control.Tests/MobileController.Control.Tests.csproj" />
     <Project Path="tests/MobileController.Server.Tests/MobileController.Server.Tests.csproj" />
   </Folder>
 </Solution>

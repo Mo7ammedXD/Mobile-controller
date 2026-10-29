@@ -1,0 +1,117 @@
+<UserControl x:Class="MobileController.Desktop.Views.DiagnosticsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="20,4,20,20">
+            <TextBlock Text="Diagnostics" Style="{StaticResource PageTitle}" />
+            <TextBlock Style="{StaticResource PageIntro}"
+                       Text="The numbers behind the dashboard, for tracking down lag or dropouts. Values refresh four times a second." />
+
+            <!-- Per phone -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Link quality per phone" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,8"
+                               Text="Gaps are the time between two packets from the phone (at 120 Hz, 8.3 ms). p95 / p99: 95 % / 99 % of the gaps were at most this long. Long gaps and lost packets usually mean a busy or distant Wi-Fi; USB tethering avoids both." />
+                    <DataGrid ItemsSource="{Binding Pads}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal" CanUserAddRows="False" MinHeight="60">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Phone" Binding="{Binding Title}" Width="*" />
+                            <DataGridTextColumn Header="Address" Binding="{Binding EndPoint}" />
+                            <DataGridTextColumn Header="RTT" Binding="{Binding LatencyText}" />
+                            <DataGridTextColumn Header="Updates/s" Binding="{Binding Info.InputsPerSecond, StringFormat=F0}" />
+                            <DataGridTextColumn Header="Lost" Binding="{Binding LossText}" />
+                            <DataGridTextColumn Header="Jitter" Binding="{Binding JitterText}" />
+                            <DataGridTextColumn Header="Gap p50" Binding="{Binding Info.GapP50Ms, StringFormat={}{0:F1} ms}" />
+                            <DataGridTextColumn Header="p95" Binding="{Binding Info.GapP95Ms, StringFormat={}{0:F1} ms}" />
+                            <DataGridTextColumn Header="p99" Binding="{Binding Info.GapP99Ms, StringFormat={}{0:F1} ms}" />
+                            <DataGridTextColumn Header="Max" Binding="{Binding Info.GapMaxMs, StringFormat={}{0:F1} ms}" />
+                            <DataGridTextColumn Header="Accepted" Binding="{Binding Info.Accepted}" />
+                            <DataGridTextColumn Header="Duplicates" Binding="{Binding Info.Duplicates}" />
+                            <DataGridTextColumn Header="Late" Binding="{Binding Info.Stale}" />
+                            <DataGridTextColumn Header="Invalid" Binding="{Binding Info.Invalid}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </StackPanel>
+            </Border>
+
+            <UniformGrid Columns="2">
+                <!-- Server -->
+                <Border Style="{StaticResource Card}" Margin="0,0,12,12">
+                    <StackPanel>
+                        <TextBlock Text="Server" Style="{StaticResource SectionTitle}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Text="Running for" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding UptimeText}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Row="1" Text="Packets received" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Snapshot.Datagrams, FallbackValue=—}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Row="2" Text="Invalid packets from unknown senders" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Snapshot.InvalidFromUnknown, FallbackValue=—}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Row="3" Text="Blocked by the allowed-phones list" />
+                            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Snapshot.Blocked, FallbackValue=—}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Row="4" Text="Receive loop passes per second" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Snapshot.Loop.PassesPerSecond, StringFormat=F0, FallbackValue=—}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Row="5" Text="Slowest loop pass" />
+                            <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Snapshot.Loop.MaxPassMs, StringFormat={}{0:F2} ms, FallbackValue=—}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Row="6" Text="Garbage collections (pause total)" />
+                            <TextBlock Grid.Row="6" Grid.Column="1" FontWeight="SemiBold">
+                                <Run Text="{Binding Snapshot.Gc.Gen0, Mode=OneWay, FallbackValue=—}" /><Run Text=" / " /><Run Text="{Binding Snapshot.Gc.Gen1, Mode=OneWay}" /><Run Text=" / " /><Run Text="{Binding Snapshot.Gc.Gen2, Mode=OneWay}" /><Run Text=" (" /><Run Text="{Binding Snapshot.Gc.PauseMs, Mode=OneWay, StringFormat=F1}" /><Run Text=" ms)" />
+                            </TextBlock>
+                        </Grid>
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
+                                   Text="The receive loop allocates no memory while phones play, so garbage collections stay rare and short." />
+                    </StackPanel>
+                </Border>
+
+                <!-- Full check -->
+                <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="System check" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Style="{StaticResource Caption}" FontSize="13" TextWrapping="Wrap">
+                            <Run Text="Driver: " /><Run Text="{Binding Driver.Detail, Mode=OneWay}" />
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource Caption}" FontSize="13" TextWrapping="Wrap" Margin="0,4,0,0">
+                            <Run Text="Firewall: " /><Run Text="{Binding Firewall.Detail, Mode=OneWay}" />
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource Caption}" FontSize="13" TextWrapping="Wrap" Margin="0,4,0,0">
+                            <Run Text="Network: " /><Run Text="{Binding Network.Detail, Mode=OneWay}" />
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource Caption}" FontSize="13" TextWrapping="Wrap" Margin="0,4,0,0">
+                            <Run Text="Power: " /><Run Text="{Binding Report.Power.Ok, Mode=OneWay, FallbackValue=unknown, StringFormat=can run at full speed in the background: {0}}" />
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource Caption}" FontSize="13" TextWrapping="Wrap" Margin="0,4,0,0">
+                            <Run Text="System: " /><Run Text="{Binding Report.Os, Mode=OneWay, FallbackValue=—}" /><Run Text=" " /><Run Text="{Binding Report.Architecture, Mode=OneWay}" />
+                        </TextBlock>
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Content="Check again" Command="{Binding RunChecksCommand}" Margin="0,0,8,0" Padding="12,5" />
+                            <Button Content="Export diagnostics" Command="{Binding ExportDiagnosticsCommand}" Margin="0,0,8,0" Padding="12,5"
+                                    ToolTip="Saves a zip with the logs, settings and this check on the desktop, for a bug report" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+
+            <!-- Tools -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Test without a phone" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource Caption}" FontSize="13" Margin="0,0,0,10"
+                               Text="Plugs in an extra controller for 10 seconds that moves by itself (sticks circle, buttons cycle). If a game or joy.cpl sees it, the driver works; if a phone still does not connect, look at the network and firewall instead." />
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Test as Xbox 360" Command="{Binding TestPatternCommand}" CommandParameter="xbox360" Margin="0,0,8,0" Padding="12,5" />
+                        <Button Content="Test as DualShock 4" Command="{Binding TestPatternCommand}" CommandParameter="ds4" Margin="0,0,8,0" Padding="12,5" />
+                        <Button Content="Restart server" Command="{Binding RestartServerCommand}" Margin="0,0,8,0" Padding="12,5" />
+                        <Button Content="Open log folder" Command="{Binding OpenLogFolderCommand}" Margin="0,0,8,0" Padding="12,5" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

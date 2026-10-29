@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using MobileController.Server.Control;
 
 namespace MobileController.Server.Tests;
 
@@ -24,10 +25,18 @@ public sealed class AllocationTests
         // measurement too. The detector thread really runs and switches the foreground app on every poll, so freshly
         // published GAME arrays are picked up and sent by the measured thread (the detector's own allocations happen
         // on its thread and are not counted).
+        // A STATUS every 64 packets and a 5 ms metrics window put status bookkeeping and the gap percentiles in it too,
+        // and an attached desktop app (snapshots every 1 ms, live state on, IDENTIFY commands) the control plane.
         int polls = 0;
-        using var h = new ServerHarness(ServerHarness.Quiet with { FeedbackIntervalMs = 5, GameIntervalMs = 5, GamePollMs = 1 },
+        using var h = new ServerHarness(
+            ServerHarness.Quiet with
+            {
+                FeedbackIntervalMs = 5, GameIntervalMs = 5, GamePollMs = 1, MetricsIntervalMs = 5, PublishIntervalMs = 1, LiveIntervalMs = 1,
+            },
             recordHistory: false, foregroundApp: () => Apps[Interlocked.Increment(ref polls) & 1]);
         h.Server.GameDetector!.Start();
+        h.Server.PublishEnabled = true;
+        h.Server.Commands.TryEnqueue(new ControlCommand(0, CommandOp.Live, 0, 1));
         using var client = h.Connect();
         ushort seq = 0;
 
@@ -61,7 +70,7 @@ public sealed class AllocationTests
         TestContext.Current.TestOutputHelper?.WriteLine(
             $"warm-up: {chunks.Count} x {Chunk} INPUTs in {warmUp.ElapsedMilliseconds} ms, bytes per chunk: {string.Join(", ", chunks)}");
         TestContext.Current.TestOutputHelper?.WriteLine(
-            $"measured: {Measured} INPUT + {pings} PING datagrams ({received} handled by the server), " +
+            $"measured: {Measured} INPUT + {pings} PING/STATUS datagrams ({received} handled by the server), " +
             $"{submits} reports submitted, {games} GAME datagrams ({gameChanges} name changes) received, " +
             $"{allocated} bytes allocated on the receive thread");
 
@@ -75,14 +84,17 @@ public sealed class AllocationTests
     }
 
     /// <summary>
-    /// Sends <paramref name="count"/> INPUTs in bursts of four, pumping the server after each burst, and returns once
-    /// the server has handled every datagram sent.
+    /// Sends <paramref name="count"/> INPUTs in bursts of four, plus a PING and a STATUS every 64 (counted in
+    /// <paramref name="pings"/>), pumping the server after each burst, and returns once the server has handled every
+    /// datagram sent.
     /// </summary>
     private static void Pump(GamepadServer server, Socket client, int count, ref ushort seq, out int pings, out PadState newest,
         out int games, out int gameChanges)
     {
         Span<byte> packet = stackalloc byte[Protocol.InputSize];
         Span<byte> ping = stackalloc byte[Protocol.PingSize];
+        Span<byte> status = stackalloc byte[Protocol.MaxStatusSize];
+        int statusLength = Protocol.WriteStatus(status, 0x1234, 80, StatusFlags.Charging, 35, 120, OutputPreference.None, 1, "Phone"u8, "Classic"u8);
         Span<byte> sink = stackalloc byte[Protocol.MaxDatagramSize];
         long target = server.DatagramsReceived + count;
         int lastGameLength = 0;
@@ -110,6 +122,20 @@ public sealed class AllocationTests
                 client.Send(ping);
                 pings++;
                 target++;
+            }
+            if (i % 64 == 32)
+            {
+                // A changing battery, so the copy into the slot really happens.
+                status[10] = (byte)(i % 100);
+                client.Send(status[..statusLength]);
+                pings++;
+                target++;
+            }
+            if (i % 1000 == 500)
+            {
+                // The desktop app asks to identify the phone; the replies are taken like the control thread would.
+                server.Commands.TryEnqueue(new ControlCommand(i, CommandOp.Identify, 0, 0));
+                while (server.Replies.TryDequeue(out _)) { }
             }
 
             if (i % 4 == 3)

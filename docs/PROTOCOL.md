@@ -36,17 +36,26 @@ drift apart silently.
 | `0x2` | `PING` | client → server | 8 | `0x12` |
 | `0x3` | `BYE` | client → server | 2 | `0x13` |
 | `0x4` | `DISCOVER` | client → server | 4 | `0x14` |
+| `0x5` | `STATUS` | client → server | 21 + E + D + P (each ≤ 32) | `0x15` |
 | `0x9` | `FEEDBACK` | server → client | 8 | `0x19` |
 | `0xA` | `PONG` | server → client | 8 | `0x1A` |
 | `0xB` | `GAME` | server → client | 3 + N (N ≤ 64) | `0x1B` |
 | `0xC` | `DISCOVER_REPLY` | server → client | 7 + N (N ≤ 32) | `0x1C` |
+| `0xD` | `COMMAND` | server → client | 4 + N (N ≤ 32) | `0x1D` |
 
-Types `0x1–0x7` travel client → server; types `0x8–0xF` travel server → client.
+Types `0x1–0x7` travel client → server; types `0x8–0xF` travel server → client. `0x6`, `0x7`, `0x8`, `0xE` and
+`0xF` are unassigned.
 
 **Validation.** A receiver MUST silently drop a datagram when any of these hold:
 length < 2 · `magic ≠ 0xA5` · `version ≠ 1` · unknown type · type not valid for this direction ·
-length ≠ the type's exact size (`DISCOVER_REPLY`: length ≠ 7 + N, or N > 32; `GAME`: length ≠ 3 + N, or N > 64).
+length ≠ the type's exact size (`DISCOVER_REPLY`: length ≠ 7 + N, or N > 32; `GAME`: length ≠ 3 + N, or N > 64;
+`STATUS`: length < 21, or E, D or P > 32, or length ≠ 21 + E + D + P, or `deviceId` = 0;
+`COMMAND`: length < 4, or N > 32, or length ≠ 4 + N).
 The server SHOULD log a version mismatch once per endpoint (not per packet).
+
+**Extending v1.** `STATUS` and `COMMAND` were added after the first release without changing the version: a peer
+that predates them drops them as an unknown type, which is harmless. For the same reason an existing packet never
+gets longer (its old receivers would drop it), and new `FEEDBACK` flags only use bits that were 0 before.
 
 ## 3. `INPUT` — client → server, 16 bytes (the hot path)
 
@@ -132,6 +141,20 @@ The server SHOULD log a version mismatch once per endpoint (not per packet).
 | Report identical to the last one submitted | MAY skip the driver call. |
 | Server shutdown | Unplug every pad. |
 
+**Status-aware clients (§12).** A client that sends `STATUS` gets three more behaviours:
+
+* **Waiting for STATUS.** An endpoint whose first `INPUT` arrives before any `STATUS` gets its pad only after
+  **100 ms** without a `STATUS` (its `INPUT`s are dropped meanwhile). Clients send `STATUS` before their first
+  `INPUT`, so in practice only clients without `STATUS` wait, and only once.
+* **Output type.** A pad is a virtual Xbox 360 or DualShock 4 controller. The first match wins: a rule for the
+  `deviceId` in the server's configuration · the client's `STATUS` preference · the server's default · Xbox 360.
+  When a later `STATUS` asks for another type, the server unplugs the pad and plugs the right one at the next
+  `INPUT`.
+* **Moving endpoints.** A `STATUS` whose `deviceId` belongs to another endpoint's slot moves that slot (and its
+  pad) to the new endpoint, so a phone that reopens its socket (Wi-Fi roaming, a new route) keeps its controller.
+  The slot then accepts the new endpoint's first `INPUT` whatever its `seq` (rule 1 of §3.3). The move is refused
+  while the old endpoint still sent `INPUT` less than 250 ms ago: two live phones never share one controller.
+
 ## 5. `FEEDBACK` — server → client, 8 bytes
 
 | Offset | Size | Type | Field |
@@ -145,7 +168,14 @@ The server SHOULD log a version mismatch once per endpoint (not per packet).
 | 6 | 2 | u16 | `lastSeq` — the most recent `INPUT` seq the server accepted from this client (0 if none) |
 
 `flags`: bit 0 `PAD_ATTACHED` (a virtual pad is plugged for this client) · bit 1 `SERVER_FULL` (no free slot) ·
-bit 2 `DRY_RUN` (server started with `--dry-run`, so no virtual pad exists) · bits 3‥7 are 0.
+bit 2 `DRY_RUN` (server started with `--dry-run`, so no virtual pad exists) · bit 3 `TARGET_DS4` (the pad is a
+DualShock 4, not an Xbox 360 controller) · bit 4 `AWAITING_APPROVAL` (the server waits for its user to accept this
+new device) · bit 5 `DENIED` (the server's user refused this device) · bit 6 `STATUS_ACK` (the server processed this
+client's `STATUS`, §12, so it also understands `COMMAND` and moving endpoints) · bit 7 is 0.
+
+* Bits 4 and 5 are only sent to clients that sent `STATUS`. An older client counts any `FEEDBACK` without
+  `SERVER_FULL` as "connected", so it gets no `FEEDBACK` at all while it waits for approval or is denied.
+* `DENIED` is sent at most once per second per endpoint.
 
 * The server sends `FEEDBACK` **immediately** when the game changes rumble (ViGEm feedback callback), and
   **every 100 ms** to every client that holds a slot. The periodic send is a heartbeat and also repairs lost
@@ -209,7 +239,7 @@ port** as the server address.
 | R1 | `A5 11 00 00 00 00 00 00 00 00 00 00 00 00 00` | 15 bytes, wrong length |
 | R2 | `A5 21 00 00 00 00 00 00 00 00 00 00 00 00 00 00` | version 2 |
 | R3 | `A4 11 00 00 00 00 00 00 00 00 00 00 00 00 00 00` | bad magic |
-| R4 | `A5 15 00 00` | unknown type 5 |
+| R4 | `A5 16 00 00` | unknown type 6 (before §12 this vector was `A5 15 00 00`, now a too-short `STATUS`) |
 | R5 | `A5 19 FF 40 00 01 34 12` received by the **server** | wrong direction |
 | R6 | `A5 13 00` | `BYE` must be exactly 2 bytes |
 
@@ -228,6 +258,42 @@ port** as the server address.
 | P9 | `GAME` unknown / no foreground game | `A5 1B 00` |
 
 `GAME` rejections (client): `A5 1B 05 61 62` (N = 5 but 2 bytes follow) · `A5 1B 41` + 65 bytes (N > 64).
+
+| # | Packet | Bytes |
+|---|---|---|
+| P10 | `FEEDBACK` DualShock 4 attached, status acknowledged, player unknown, lastSeq 5 | `A5 19 00 00 FF 49 05 00` |
+| P11 | `FEEDBACK` awaiting approval, status acknowledged | `A5 19 00 00 FF 50 00 00` |
+| P12 | `FEEDBACK` denied, status acknowledged | `A5 19 00 00 FF 60 00 00` |
+
+### 9.5 `STATUS` (§12)
+
+| # | Meaning | Bytes |
+|---|---|---|
+| S1 | deviceId `0x0123456789ABCDEF`, battery 87 %, charging, RTT 4.2 ms, 120 Hz, wants DualShock 4, app version 2, device "Pixel", profile "Shooter" (33 bytes) | `A5 15 EF CD AB 89 67 45 23 01 57 01 2A 00 78 02 02 00 00 05 07 50 69 78 65 6C 53 68 6F 6F 74 65 72` |
+| S2 | deviceId 1, everything else unknown or empty (21 bytes) | `A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 00 00` |
+| S3 | as S2 with a 2-byte extension (skipped) and device name "X" (24 bytes) | `A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 02 01 00 AA BB 58` |
+| S4 | as S2 with device name 31 × `A` + `é` (33 UTF-8 bytes): the `é` is dropped whole, D = 31 | `A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 1F 00` + 31 × `41` |
+
+Must be rejected:
+
+| # | Bytes | Reason |
+|---|---|---|
+| RS1 | `A5 15 00 00` | shorter than 21 bytes |
+| RS2 | S2 + `00` | 22 bytes, but E + D + P = 0 |
+| RS3 | S1 without its last byte | 32 bytes, but E + D + P = 12 |
+| RS4 | S2 with D = `21`, + 33 × `41` | D = 33 > 32 |
+| RS5 | `A5 15 00 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 00 00` | `deviceId` 0 |
+| RS6 | S1 received by the **client** | wrong direction |
+
+### 9.6 `COMMAND` (§13)
+
+| # | Meaning | Bytes |
+|---|---|---|
+| C1 | identify, token 7, 3.0 s | `A5 1D 01 02 07 1E` |
+| C2 | unknown op `0x7F`, no arguments: valid, ignored | `A5 1D 7F 00` |
+
+Must be rejected: `A5 1D 01 02 07` (N = 2, one argument byte) · `A5 1D 01 21` + 33 × `00` (N > 32) · `A5 1D 01`
+(shorter than 4 bytes) · C1 received by the **server** (wrong direction).
 
 ### 9.4 Sequence acceptance (§3.3, slot active, not timed-out)
 
@@ -268,3 +334,56 @@ which mode; the server only reports what is running).
 
 UDP has no authentication. Anyone who can reach UDP 24680 on the PC can drive the virtual controller. Keep
 the firewall rule scoped to `LocalSubnet`, and use the server's `--allow <ip>` option to pin a specific phone.
+
+The `deviceId` of §12 identifies a phone for convenience (names, output type, approval). It is **not** a secret
+and not authentication: anything on the network can copy it. Approving devices keeps a stray phone from grabbing
+a controller by accident; it does not stop an attacker.
+
+## 12. `STATUS` — client → server, 21 + E + D + P bytes
+
+Who the client is and how it is doing, for the server's user interface and per-device settings.
+
+| Offset | Size | Type | Field |
+|---|---|---|---|
+| 0 | 1 | u8 | `0xA5` |
+| 1 | 1 | u8 | `0x15` |
+| 2 | 8 | u64 | `deviceId` — random per app install, never 0 |
+| 10 | 1 | u8 | `battery` — 0‥100 %, `0xFF` = unknown |
+| 11 | 1 | u8 | `flags` — bit 0 `CHARGING` · bit 1 `MENU_OPEN` (settings or layout editor open, inputs neutral) · bit 2 `MOTION_ACTIVE` (gyro or tilt in use) · bits 3‥7 are 0 |
+| 12 | 2 | u16 | `rtt` — smoothed round-trip time (§6) in units of 0.1 ms; `0xFFFF` = unknown, larger values saturate at `0xFFFE` |
+| 14 | 1 | u8 | `rate` — the configured heartbeat rate in Hz (§3.4), 0 = unknown |
+| 15 | 1 | u8 | `output` — preferred pad: 0 no preference · 1 Xbox 360 · 2 DualShock 4; other values mean 0 |
+| 16 | 2 | u16 | `appVersion` — the client's build number, saturating |
+| 18 | 1 | u8 | `E` — extension length, 0‥32 (0 in this revision; receivers skip it) |
+| 19 | 1 | u8 | `D` — device name length, 0‥32 |
+| 20 | 1 | u8 | `P` — profile name length, 0‥32 |
+| 21 | E | — | extension, ignored |
+| 21 + E | D | UTF-8 | device name (e.g. "Pixel 8"), truncated **at a character boundary** like §8 |
+| 21 + E + D | P | UTF-8 | name of the active layout or profile, truncated the same way |
+
+* Invalid UTF-8 in a name is shown with replacement characters; it is not a reason to drop the datagram.
+* **Send policy:** right after the client socket is created, **before** its first `INPUT`, and again 30 ms and
+  100 ms later (until a `FEEDBACK` carries `STATUS_ACK`); then once per second, and when a field changes (at most
+  one per 100 ms).
+* A server that does not know `STATUS` drops it (§2), so clients send it regardless.
+
+## 13. `COMMAND` — server → client, 4 + N bytes
+
+A request from the server's user to the phone.
+
+| Offset | Size | Type | Field |
+|---|---|---|---|
+| 0 | 1 | u8 | `0xA5` |
+| 1 | 1 | u8 | `0x1D` |
+| 2 | 1 | u8 | `op` |
+| 3 | 1 | u8 | `N` — argument length, 0‥32 |
+| 4 | N | — | arguments of `op` |
+
+* A client ignores (without dropping the connection or logging per packet) an unknown `op`, and a known `op`
+  whose N is not the one listed below. New commands therefore need no new packet type.
+* `COMMAND` is only sent to clients whose `STATUS` was acknowledged (`STATUS_ACK`).
+
+| `op` | Name | N | Arguments |
+|---|---|---|---|
+| `0x01` | `IDENTIFY` | 2 | u8 `token`, u8 `duration` in 0.1 s (0 = 3 s): vibrate and flash the screen so the user can tell which phone is which. The server sends it 3 times (0, 50, 100 ms); the client acts once per `token` within 5 s. |
+| `0x02` | `LIGHTBAR` | 3 | reserved: u8 red, green, blue of a DualShock 4 light bar |

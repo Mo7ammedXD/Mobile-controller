@@ -117,7 +117,7 @@ class ProtocolTest {
         assertInvalid("A5 11 00 00 00 00 00 00 00 00 00 00 00 00 00", serverToClient = false) // R1 15 bytes
         assertInvalid("A5 21 00 00 00 00 00 00 00 00 00 00 00 00 00 00", serverToClient = false) // R2 version 2
         assertInvalid("A4 11 00 00 00 00 00 00 00 00 00 00 00 00 00 00", serverToClient = false) // R3 magic
-        assertInvalid("A5 15 00 00", serverToClient = false) // R4 unknown type
+        assertInvalid("A5 16 00 00", serverToClient = false) // R4 unknown type
         assertInvalid("A5 19 FF 40 00 01 34 12", serverToClient = false) // R5 FEEDBACK at the server
         assertInvalid("A5 13 00", serverToClient = false) // R6 BYE length
     }
@@ -143,9 +143,81 @@ class ProtocolTest {
         assertInvalid("A4 19 FF 40 00 01 34 12")
         assertInvalid("A5 29 FF 40 00 01 34 12") // version 2
         assertInvalid("A5 09 FF 40 00 01 34 12") // version 0
-        for (type in intArrayOf(0x0, 0x8, 0xD, 0xE, 0xF)) {
+        for (type in intArrayOf(0x0, 0x8, 0xE, 0xF)) {
             assertInvalid("A5 %02X FF 40 00 01 34 12".format(0x10 or type))
         }
+    }
+
+    // --- §9.3 P10..P12, §9.5 STATUS, §9.6 COMMAND -----------------------------------------------
+
+    @Test
+    fun p10_p12_newFeedbackFlags() {
+        val ds4 = hex("A5 19 00 00 FF 49 05 00")
+        assertEquals(Protocol.TYPE_FEEDBACK, Protocol.validate(ds4, ds4.size, serverToClient = true))
+        assertEquals(
+            Protocol.FLAG_STATUS_ACK or Protocol.FLAG_TARGET_DS4 or Protocol.FLAG_PAD_ATTACHED,
+            Protocol.u8(ds4, Protocol.FEEDBACK_FLAGS),
+        )
+        assertEquals(Protocol.FLAG_STATUS_ACK or Protocol.FLAG_AWAITING_APPROVAL, Protocol.u8(hex("A5 19 00 00 FF 50 00 00"), Protocol.FEEDBACK_FLAGS))
+        assertEquals(Protocol.FLAG_STATUS_ACK or Protocol.FLAG_DENIED, Protocol.u8(hex("A5 19 00 00 FF 60 00 00"), Protocol.FEEDBACK_FLAGS))
+    }
+
+    private fun status(name: String, profile: String, id: Long = 1L, battery: Int = Protocol.BATTERY_UNKNOWN, flags: Int = 0,
+        rtt: Int = Protocol.RTT_UNKNOWN, rate: Int = 0, output: Int = Protocol.OUTPUT_NONE, version: Int = 0): ByteArray {
+        val b = ByteArray(Protocol.MAX_STATUS_SIZE)
+        val n = Protocol.encodeName(name)
+        val p = Protocol.encodeName(profile)
+        val length = Protocol.writeStatus(b, id, battery, flags, rtt, rate, output, version, n, n.size, p, p.size)
+        return b.copyOf(length)
+    }
+
+    @Test
+    fun s1_s2_s4_status() {
+        val s1 = status("Pixel", "Shooter", 0x0123456789ABCDEFL, 87, Protocol.STATUS_CHARGING, 42, 120, Protocol.OUTPUT_DS4, 2)
+        assertArrayEquals(hex("A5 15 EF CD AB 89 67 45 23 01 57 01 2A 00 78 02 02 00 00 05 07 50 69 78 65 6C 53 68 6F 6F 74 65 72"), s1)
+        assertEquals(Protocol.TYPE_STATUS, Protocol.validate(s1, s1.size, serverToClient = false))
+        assertArrayEquals(hex("A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 00 00"), status("", ""))
+        assertArrayEquals(
+            hex("A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 1F 00" + " 41".repeat(31)),
+            status("A".repeat(31) + "é", ""),
+        )
+        // RTT saturates instead of wrapping.
+        assertEquals(Protocol.RTT_UNKNOWN, Protocol.u16(status("", "", rtt = 1_000_000), 12))
+        // A 4-byte emoji that does not fit whole is dropped whole.
+        assertEquals(29, Protocol.encodeName("0123456789abcdef0123456789abc😀").size)
+    }
+
+    @Test
+    fun s3_statusWithAnExtensionIsValid() {
+        val s3 = hex("A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 02 01 00 AA BB 58")
+        assertEquals(Protocol.TYPE_STATUS, Protocol.validate(s3, s3.size, serverToClient = false))
+    }
+
+    @Test
+    fun rs1_rs6_malformedStatus() {
+        assertInvalid("A5 15 00 00", serverToClient = false)
+        assertInvalid("A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 00 00 00", serverToClient = false)
+        assertInvalid("A5 15 EF CD AB 89 67 45 23 01 57 01 2A 00 78 02 02 00 00 05 07 50 69 78 65 6C 53 68 6F 6F 74 65", serverToClient = false)
+        assertInvalid("A5 15 01 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 21 00" + " 41".repeat(33), serverToClient = false)
+        assertInvalid("A5 15 00 00 00 00 00 00 00 00 FF 00 FF FF 00 00 00 00 00 00 00", serverToClient = false)
+        // RS6: a STATUS arriving at the phone.
+        assertInvalid("A5 15 EF CD AB 89 67 45 23 01 57 01 2A 00 78 02 02 00 00 05 07 50 69 78 65 6C 53 68 6F 6F 74 65 72")
+    }
+
+    @Test
+    fun c1_c2_commands() {
+        val c1 = hex("A5 1D 01 02 07 1E")
+        assertEquals(Protocol.TYPE_COMMAND, Protocol.validate(c1, c1.size, serverToClient = true))
+        assertEquals(Protocol.COMMAND_IDENTIFY, Protocol.u8(c1, Protocol.COMMAND_OP))
+        assertEquals(2, Protocol.u8(c1, Protocol.COMMAND_ARG_LENGTH))
+        assertEquals(7, Protocol.u8(c1, Protocol.COMMAND_ARGS))
+        assertEquals(30, Protocol.u8(c1, Protocol.COMMAND_ARGS + 1))
+        val c2 = hex("A5 1D 7F 00")
+        assertEquals(Protocol.TYPE_COMMAND, Protocol.validate(c2, c2.size, serverToClient = true))
+        assertInvalid("A5 1D 01 02 07")
+        assertInvalid("A5 1D 01 21" + " 00".repeat(33))
+        assertInvalid("A5 1D 01")
+        assertInvalid("A5 1D 01 02 07 1E", serverToClient = false)
     }
 
     @Test

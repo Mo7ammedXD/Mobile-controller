@@ -44,11 +44,26 @@
     <string name="rate_60">60 Hz</string>
     <string name="rate_90">90 Hz</string>
     <string name="rate_120">120 Hz</string>
+    <string name="settings_output">Controller on the PC</string>
+    <string name="output_auto">PC decides</string>
+    <string name="output_xbox">Xbox</string>
+    <string name="output_ds4">DualShock 4</string>
     <string name="settings_haptics">Haptic feedback (buttons, misses, sprint)</string>
     <string name="settings_rumble">Game rumble</string>
-    <string name="settings_deadzone">Stick deadzone: %d %%</string>
+    <string name="settings_deadzone">Left stick deadzone: %d %%</string>
+    <string name="settings_deadzone_right">Right stick deadzone: %d %%</string>
+    <string name="settings_min_press">Minimum press: %d ms</string>
+    <string name="settings_min_press_off">Minimum press: off</string>
+    <string name="settings_haptic_intensity">Haptic strength: %d %%</string>
+    <string name="settings_rumble_gain">Rumble strength: %d %%</string>
+    <string name="settings_gyro_smoothing">Gyro smoothing: %d °/s</string>
+    <string name="settings_gyro_smoothing_off">Gyro smoothing: off</string>
+    <string name="calibrate_gyro">Calibrate gyro</string>
+    <string name="gyro_calibrating">Calibrating: lay the phone down and keep it still for 2 seconds…</string>
+    <string name="gyro_calibrated">Gyro calibrated</string>
     <string name="settings_feel">Feel in this mode</string>
-    <string name="settings_anti_deadzone">Anti-deadzone: %d %%</string>
+    <string name="settings_anti_deadzone">Right stick anti-deadzone: %d %%</string>
+    <string name="settings_anti_deadzone_left">Left stick anti-deadzone: %d %%</string>
     <string name="settings_curve">Aim precision: %.1f</string>
     <string name="settings_curve_linear">Aim precision: linear</string>
     <string name="settings_sensitivity">Stick sensitivity: %d %%</string>
@@ -79,4 +94,15 @@
     <string name="exit">Exit</string>
 
     <string name="back_again">Press back again to exit</string>
+
+    <!-- The desktop app's QR code link, and finding a PC again. -->
+    <string name="link_title">Connect to this PC?</string>
+    <string name="link_message">%1$s\n%2$s, port %3$d</string>
+    <string name="link_connect">Connect</string>
+    <string name="link_invalid">This link does not point to a PC.</string>
+    <string name="pc_found_again">Found %1$s again at %2$s</string>
+    <string name="recent_pc">Recent: %1$s  ·  %2$s:%3$d</string>
+
+    <!-- Shown while the PC asks this phone to identify itself. -->
+    <string name="identify">This phone</string>
 </resources>

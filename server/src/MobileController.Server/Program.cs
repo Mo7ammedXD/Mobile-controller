@@ -2,10 +2,11 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using MobileController.Control;
+using MobileController.Server.Control;
 using Nefarius.ViGEm.Client.Exceptions;
 
 namespace MobileController.Server;
@@ -19,6 +20,9 @@ internal static class Program
     private const int ExitNetwork = 4;
 
     private const string ViGEmDownload = "https://github.com/nefarius/ViGEmBus/releases";
+
+    public static string Version { get; } =
+        typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "?";
 
     private static int Main(string[] args)
     {
@@ -35,15 +39,45 @@ internal static class Program
             return ExitOk;
         }
 
-        using var log = new Logger(Console.Out);
+        // The settings file is the baseline and the command line is parsed again on top of it, so an option typed
+        // there always wins over the file.
+        var configWarnings = new List<string>();
+        string? configPath = options.ConfigPath ?? (!options.NoConfig && File.Exists(ServerSettings.DefaultPath) ? ServerSettings.DefaultPath : null);
+        if (configPath is not null)
+        {
+            if (!ServerConfig.TryLoad(configPath, new Options(), out var fromFile, configWarnings, out error) ||
+                !Options.TryParse(args, fromFile, out options, out error))
+            {
+                Console.Error.WriteLine($"Error: {error}");
+                return ExitBadArguments;
+            }
+        }
+
+        if (options.Diagnose)
+        {
+            var report = Diagnostics.Collect(options, configPath, configWarnings);
+            if (options.Json) Diagnostics.WriteJson(report, Console.Out);
+            else Diagnostics.WriteText(report, Console.Out);
+            return ExitOk;
+        }
+
+        using var log = new Logger(Console.Out, filePath: options.LogFile);
+        if (log.FileProblem is not null) log.Warn($"Could not open the log file {options.LogFile}: {log.FileProblem}");
+        if (configPath is not null) log.Info($"Settings file: {configPath}");
+        foreach (string warning in configWarnings) log.Warn(warning);
         TuneProcess(options.HighPriority, log);
-        return options.TestPatternSeconds is int seconds ? RunTestPattern(seconds, log) : RunServer(options, log);
+        return options.TestPatternSeconds is int seconds ? RunTestPattern(seconds, options.DefaultOutput, log) : RunServer(options, log);
     }
 
     private static int RunServer(Options options, Logger log)
     {
         IVirtualPadFactory? factory = null;
-        if (!options.DryRun && !TryCreateFactory(out factory)) return ExitViGEm;
+        if (!options.DryRun && !TryCreateFactory(out factory, out string? problem))
+        {
+            Console.Error.WriteLine($"Error: {problem}");
+            log.Error(problem);
+            return ExitViGEm;
+        }
 
         GamepadServer server;
         try
@@ -53,7 +87,9 @@ internal static class Program
         catch (SocketException e)
         {
             factory?.Dispose();
-            Console.Error.WriteLine(DescribeBindFailure(e, options));
+            string message = DescribeBindFailure(e, options);
+            Console.Error.WriteLine($"Error: {message}");
+            log.Error(message);
             return ExitNetwork;
         }
 
@@ -78,16 +114,24 @@ internal static class Program
         AppDomain.CurrentDomain.ProcessExit += (_, _) => StopAndWait();
 
         server.Start();
+        // The desktop app's control pipe, if asked for; it only ever reads snapshots and queues commands.
+        var host = options.ControlPipe is { } pipeName ? new ControlHost(pipeName, server, options, log) : null;
+        host?.Start();
         server.WaitForExit();
+        host?.Dispose();
         server.Dispose();
         factory?.Dispose();
         log.Info(server.Faulted ? "Stopped after an error." : "Stopped.");
         return server.Faulted ? ExitFailure : ExitOk;
     }
 
-    private static int RunTestPattern(int seconds, Logger log)
+    private static int RunTestPattern(int seconds, PadKind kind, Logger log)
     {
-        if (!TryCreateFactory(out var factory)) return ExitViGEm;
+        if (!TryCreateFactory(out var factory, out string? problem))
+        {
+            Console.Error.WriteLine($"Error: {problem}");
+            return ExitViGEm;
+        }
         using (factory)
         using (var cancellation = new CancellationTokenSource())
         {
@@ -98,7 +142,7 @@ internal static class Program
             };
             try
             {
-                TestPattern.Run(factory, TimeSpan.FromSeconds(seconds), cancellation.Token, log);
+                TestPattern.Run(factory, kind, TimeSpan.FromSeconds(seconds), cancellation.Token, log);
             }
             catch (Exception e)
             {
@@ -109,13 +153,14 @@ internal static class Program
         return ExitOk;
     }
 
-    private static bool TryCreateFactory([NotNullWhen(true)] out IVirtualPadFactory? factory)
+    /// <summary>Connects to ViGEmBus, or explains in <paramref name="problem"/> what is wrong and how to fix it.</summary>
+    public static bool TryCreateFactory([NotNullWhen(true)] out IVirtualPadFactory? factory, [NotNullWhen(false)] out string? problem)
     {
         factory = null;
-        string? problem;
         try
         {
             factory = new ViGEmPadFactory();
+            problem = null;
             return true;
         }
         catch (VigemBusNotFoundException)
@@ -143,14 +188,13 @@ internal static class Program
         {
             problem = $"ViGEmBus refused the connection ({e.GetType().Name}). Reboot and try again.";
         }
-        Console.Error.WriteLine($"Error: {problem}");
         return false;
     }
 
-    private static string DescribeBindFailure(SocketException e, Options options)
+    public static string DescribeBindFailure(SocketException e, Options options)
     {
         string where = $"{options.BindAddress}:{options.Port}";
-        return "Error: " + e.SocketErrorCode switch
+        return e.SocketErrorCode switch
         {
             SocketError.AddressAlreadyInUse =>
                 $"UDP port {options.Port} is already in use (is another server instance running?). " +
@@ -182,15 +226,14 @@ internal static class Program
 
     private static void PrintBanner(Options options, IPEndPoint local)
     {
-        string version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            .Split('+')[0] ?? "?";
         var o = Console.Out;
-        o.WriteLine($"Mobile Controller server {version} (protocol v{Protocol.Version})");
+        o.WriteLine($"Mobile Controller server {Version} (protocol v{Protocol.Version}), shown to phones as \"{options.ServerName}\"");
         o.WriteLine($"Listening on UDP {local}, up to {options.MaxPads} controller(s), " +
                     (options.DryRun ? "DRY RUN (no virtual controllers)" : "ViGEmBus connected"));
         if (options.Allow.Count != 0) o.WriteLine($"Accepting packets only from: {string.Join(", ", options.Allow)}");
+        if (options.LogFile is not null) o.WriteLine($"Log file: {options.LogFile}");
 
-        var addresses = LocalIPv4Addresses().ToList();
+        var addresses = NetworkHints.LocalIPv4Addresses();
         if (addresses.Count == 0)
         {
             o.WriteLine("No active network adapter has an IPv4 address. Join the phone's Wi-Fi or enable USB tethering.");
@@ -198,42 +241,15 @@ internal static class Program
         else
         {
             o.WriteLine("Enter one of these addresses in the phone app (or use auto-discovery):");
-            foreach (var (address, name, description) in addresses)
+            foreach (var adapter in addresses)
             {
-                string hint = IsUsbTethering(description) ? "   <- USB tethering"
-                    : IsVirtual(description) ? "   (virtual adapter, not reachable from a phone)"
-                    : address.ToString().StartsWith("169.254.", StringComparison.Ordinal) ? "   (no DHCP lease: link-local only)"
-                    : "";
-                bool reachable = options.BindAddress.Equals(IPAddress.Any) || options.BindAddress.Equals(address);
-                o.WriteLine($"  {address,-15}  {name} - {description}{hint}{(reachable ? "" : "   (not bound)")}");
+                string hint = NetworkHints.Hint(adapter.Kind);
+                bool reachable = options.BindAddress.Equals(IPAddress.Any) || options.BindAddress.Equals(adapter.Address);
+                o.WriteLine($"  {adapter.Address,-15}  {adapter.Name} - {adapter.Description}{(hint.Length == 0 ? "" : "   " + hint)}" +
+                            (reachable ? "" : "   (not bound)"));
             }
         }
-        o.WriteLine($"If the phone cannot connect, allow UDP {local.Port} in Windows Firewall (scripts\\Add-FirewallRule.ps1). Ctrl+C stops.");
+        o.WriteLine($"If the phone cannot connect, allow UDP {local.Port} in Windows Firewall (scripts\\Add-FirewallRule.ps1). " +
+                    "--diagnose checks everything. Ctrl+C stops.");
     }
-
-    private static IEnumerable<(IPAddress Address, string Name, string Description)> LocalIPv4Addresses()
-    {
-        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (nic.OperationalStatus != OperationalStatus.Up || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
-            foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
-            {
-                var address = unicast.Address;
-                if (address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address))
-                    yield return (address, nic.Name, nic.Description);
-            }
-        }
-    }
-
-    // Android tethering shows up as "Remote NDIS based Internet Sharing Device" (RNDIS) or, on newer phones, as a
-    // UsbNcm adapter.
-    private static bool IsUsbTethering(string description) =>
-        description.Contains("Remote NDIS", StringComparison.OrdinalIgnoreCase) ||
-        description.Contains("RNDIS", StringComparison.OrdinalIgnoreCase) ||
-        description.Contains("UsbNcm", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsVirtual(string description) =>
-        description.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase) ||
-        description.Contains("VirtualBox", StringComparison.OrdinalIgnoreCase) ||
-        description.Contains("VMware", StringComparison.OrdinalIgnoreCase);
 }

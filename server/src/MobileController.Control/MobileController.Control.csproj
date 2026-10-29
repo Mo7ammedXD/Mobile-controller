@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- What the server and the desktop app share: the control-pipe messages, the settings file and the network
+       adapter hints. Plain net10.0 (no Windows APIs), so its tests run on any OS. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MobileController.Control</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MobileController.Server" />
+    <InternalsVisibleTo Include="MobileController.Control.Tests" />
+  </ItemGroup>
+
+</Project>

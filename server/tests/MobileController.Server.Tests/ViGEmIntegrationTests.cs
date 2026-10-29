@@ -101,6 +101,51 @@ public sealed class ViGEmIntegrationTests
         Assert.Contains("disconnected (bye) -> controller 1 unplugged", text);
     }
 
+    /// <summary>
+    /// The fake pads of the allocation test cannot show what the real wrapper does; this proves that submitting to a real
+    /// virtual DualShock 4 allocates nothing either. (XInput cannot see a DS4, so its input is not read back here.)
+    /// </summary>
+    [Fact]
+    public void Dualshock4_plugs_in_and_submitting_allocates_nothing()
+    {
+        ViGEmPadFactory factory;
+        try
+        {
+            factory = new ViGEmPadFactory();
+        }
+        catch (VigemBusNotFoundException)
+        {
+            Assert.Skip("ViGEmBus is not installed.");
+            return;
+        }
+        using (factory)
+        using (var pad = factory.Create(PadKind.DualShock4, (_, _, _) => { }))
+        {
+            Assert.Equal(PadKind.DualShock4, pad.Kind);
+            // Like AllocationTests: binding the P/Invoke and tiered recompilation allocate once, early; wait them out
+            // (at least 1.5 s, then three clean chunks in a row), then measure.
+            var warmUp = Stopwatch.StartNew();
+            int clean = 0;
+            while (warmUp.ElapsedMilliseconds < 1500 || clean < 3)
+            {
+                long start = GC.GetAllocatedBytesForCurrentThread();
+                SubmitMany(pad, 1000);
+                clean = GC.GetAllocatedBytesForCurrentThread() == start ? clean + 1 : 0;
+                Assert.True(warmUp.ElapsedMilliseconds < 20_000, "allocation never settled");
+            }
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            SubmitMany(pad, 10_000);
+            Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+            pad.Submit(default);
+        }
+
+        static void SubmitMany(IVirtualPad pad, int count)
+        {
+            for (int i = 0; i < count; i++)
+                pad.Submit(new PadState((ushort)(i & 0xF7FF), (byte)i, (byte)~i, (short)(i * 7), (short)-i, 0, 0));
+        }
+    }
+
     private static int FindProbe()
     {
         for (int i = 0; i < XInput.MaxUsers; i++)

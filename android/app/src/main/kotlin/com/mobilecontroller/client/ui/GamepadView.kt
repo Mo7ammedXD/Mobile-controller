@@ -13,11 +13,11 @@ import android.graphics.Typeface
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
-import android.view.HapticFeedbackConstants
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
+import com.mobilecontroller.client.Haptics
 import com.mobilecontroller.client.LOG_TAG
 import com.mobilecontroller.client.R
 import com.mobilecontroller.client.input.TouchRouter
@@ -125,6 +125,19 @@ class GamepadView(context: Context, private val link: UdpLink) : View(context) {
         }
     }
 
+    /** The PC presents this phone as a DualShock 4: labels use PlayStation names. */
+    private var playStation = false
+
+    // §13 IDENTIFY: the PC's user asked which phone this is; the screen pulses until this time.
+    private var identifyUntil = 0L
+    private val textIdentify = context.getString(R.string.identify)
+    private val identifyTick = object : Runnable {
+        override fun run() {
+            invalidate()
+            if (SystemClock.uptimeMillis() < identifyUntil) postOnAnimation(this)
+        }
+    }
+
     // Status line, rebuilt at most 4 times per second without allocating.
     private val status = CharLine(STATUS_CAPACITY)
     private var statusCode = -1
@@ -203,20 +216,18 @@ class GamepadView(context: Context, private val link: UdpLink) : View(context) {
     /**
      * Haptic landmarks, so the player knows what the thumb is on without looking: a firm confirm for
      * sprint starting or a toggle switching on, a double "reject" for empty glass or a toggle off, a
-     * tick for a button, and a light clock tick when a stick reaches full output.
+     * click for a button, and a light tick when a stick reaches full output. Played by [Haptics], so
+     * they work with the system's touch feedback off and respect the game's rumble.
      */
     private fun haptic(flags: Int) {
-        val modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-        val effect = when {
-            (flags and (TouchRouter.EDGE or TouchRouter.TOGGLE_ON)) != 0 ->
-                if (modern) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.LONG_PRESS
-            (flags and (TouchRouter.MISS or TouchRouter.TOGGLE_OFF)) != 0 ->
-                if (modern) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.VIRTUAL_KEY
-            (flags and TouchRouter.PRESS) != 0 -> HapticFeedbackConstants.VIRTUAL_KEY
-            (flags and TouchRouter.RIM) != 0 -> HapticFeedbackConstants.CLOCK_TICK
+        val event = when {
+            (flags and (TouchRouter.EDGE or TouchRouter.TOGGLE_ON)) != 0 -> Haptics.EVENT_CONFIRM
+            (flags and (TouchRouter.MISS or TouchRouter.TOGGLE_OFF)) != 0 -> Haptics.EVENT_REJECT
+            (flags and TouchRouter.PRESS) != 0 -> Haptics.EVENT_PRESS
+            (flags and TouchRouter.RIM) != 0 -> Haptics.EVENT_RIM
             else -> return
         }
-        performHapticFeedback(effect)
+        link.rumble.haptics.play(event)
     }
 
     /** The gear (or an accessibility click on the surface) opens the settings. */
@@ -250,21 +261,29 @@ class GamepadView(context: Context, private val link: UdpLink) : View(context) {
         layout.load(mode)
         router.reset()
         link.wake()
-        for (c in 0 until layout.count) {
-            val s = layout.spec(c)
-            labels[c] = s.label
-            subs[c] = s.sub
-            colors[c] = s.color
-            text.textSize = MEASURE_SIZE
-            labelWidth[c] = if (s.label.isEmpty()) 0f else text.measureText(s.label)
-            subWidth[c] = if (s.sub.isEmpty()) 0f else text.measureText(s.sub)
-        }
+        prepareLabels()
         savedLayout = serialized
         if (serialized == null || !layout.parse(serialized)) layout.resetToDefaults()
         onGeometryChanged()
     }
 
     /** Left-handed: mirror every control left <-> right. */
+    /**
+     * Each control's text, colour and measured label widths, in Xbox or (while the PC presents this phone as a
+     * DualShock 4) PlayStation terms. Allocates; only when a mode is applied or the pad kind changes.
+     */
+    private fun prepareLabels() {
+        text.textSize = MEASURE_SIZE
+        for (c in 0 until layout.count) {
+            val s = layout.spec(c)
+            labels[c] = if (playStation) Glyphs.playStation(s.label) else s.label
+            subs[c] = if (playStation) Glyphs.playStation(s.sub) else s.sub
+            colors[c] = if (playStation) Glyphs.playStationColor(s.color) else s.color
+            labelWidth[c] = if (labels[c].isEmpty()) 0f else text.measureText(labels[c])
+            subWidth[c] = if (subs[c].isEmpty()) 0f else text.measureText(subs[c])
+        }
+    }
+
     fun setMirrored(mirror: Boolean) {
         if (mirror == layout.mirrored) return
         releaseAll()
@@ -569,6 +588,12 @@ class GamepadView(context: Context, private val link: UdpLink) : View(context) {
         val connected = code == UdpLink.STATUS_CONNECTED
         val player = if (connected) link.playerIndex else -1
         val flags = if (connected) link.feedbackFlags else -1
+        // Keep the last kind while not connected, so a short drop-out does not flip every label back and forth.
+        if (connected && ((flags and Protocol.FLAG_TARGET_DS4) != 0) != playStation) {
+            playStation = !playStation
+            prepareLabels()
+            invalidate()
+        }
         val rtt = if (connected) link.rttMicros.let { if (it < 0) -1 else (it + 500) / 1000 } else -1
         if (player in 0..3 && player != bannerPlayer && (flags and Protocol.FLAG_PAD_ATTACHED) != 0) {
             // The PC just made this phone player N: say so, big, in the player's colour.
@@ -595,6 +620,9 @@ class GamepadView(context: Context, private val link: UdpLink) : View(context) {
                 s.append(textConnected)
                 if ((flags and Protocol.FLAG_DRY_RUN) != 0) {
                     s.append(SEPARATOR).append(textDryRun)
+                } else if ((flags and Protocol.FLAG_TARGET_DS4) != 0) {
+                    // A DualShock 4 has no XInput player number.
+                    s.append(SEPARATOR).append("DS4")
                 } else if ((flags and Protocol.FLAG_PAD_ATTACHED) != 0 && player in 0..3) {
                     s.append(SEPARATOR).append('P').append(player + 1)
                 }
@@ -658,7 +686,26 @@ class GamepadView(context: Context, private val link: UdpLink) : View(context) {
             }
         }
         if (editing) drawEditOverlay(canvas)
+        drawIdentify(canvas)
         drawStatus(canvas)
+    }
+
+    /** Pulses the screen for [durationMs] so the player can spot this phone among several. */
+    fun identify(durationMs: Int) {
+        identifyUntil = SystemClock.uptimeMillis() + durationMs
+        removeCallbacks(identifyTick)
+        postOnAnimation(identifyTick)
+    }
+
+    private fun drawIdentify(canvas: Canvas) {
+        val left = identifyUntil - SystemClock.uptimeMillis()
+        if (left <= 0) return
+        // Two pulses per second, bright enough to see across a room.
+        val phase = (left % IDENTIFY_PULSE_MS).toFloat() / IDENTIFY_PULSE_MS
+        val alpha = (if (phase < 0.5f) phase * 2 else (1 - phase) * 2) * 0.55f
+        fill.color = (COLOR_IDENTIFY and 0x00FFFFFF) or ((alpha * 255).toInt() shl 24)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fill)
+        drawText(canvas, textIdentify, (layout.left + layout.right) / 2, layout.top + layout.height * 0.45f, layout.unit * 0.16f, COLOR_TEXT)
     }
 
     /**
@@ -690,7 +737,7 @@ class GamepadView(context: Context, private val link: UdpLink) : View(context) {
         val by = if (held) router.stickY[c] else layout.y[c]
         if (layout.mask[c] != 0) {
             // Edge ring: push the thumb out to it for the stick's edge action (sprint).
-            val ring = r * TouchRouter.EDGE_ON
+            val ring = r * router.edgeOnRadius
             val on = router.edgeOn[c]
             dashed.color = if (on) COLOR_EDGE else COLOR_RING
             dashed.strokeWidth = max(r * (if (on) 0.05f else 0.025f), density)
@@ -929,6 +976,8 @@ class GamepadView(context: Context, private val link: UdpLink) : View(context) {
         private const val SNAP_GRID = 0.02f
 
         private const val BANNER_MS = 2500L
+        private const val IDENTIFY_PULSE_MS = 500L
+        private const val COLOR_IDENTIFY = 0xFFFFFFFF.toInt()
 
         // Player 1-4: green, blue, orange, purple - distinct for colour-blind players too (hue + brightness).
         private val PLAYER_COLORS = intArrayOf(0xFF5DC21E.toInt(), 0xFF2D8CFF.toInt(), 0xFFFF8A3D.toInt(), 0xFFB36BFF.toInt())

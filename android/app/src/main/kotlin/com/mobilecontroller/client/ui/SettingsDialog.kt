@@ -19,6 +19,7 @@ import android.widget.TextView
 import com.mobilecontroller.client.R
 import com.mobilecontroller.client.Settings
 import com.mobilecontroller.client.net.Discovery
+import com.mobilecontroller.client.net.KnownPcs
 import com.mobilecontroller.client.protocol.Protocol
 import java.util.Locale
 
@@ -34,6 +35,8 @@ class SettingsDialog(
     private val discovery: Discovery,
     /** Whether this phone has the sensor a [GameMode.motion] needs. */
     private val motionAvailable: (Int) -> Boolean,
+    /** "Calibrate gyro": measures the resting offset and stores it (not part of Save / Cancel). */
+    private val onCalibrateGyro: () -> Unit,
     private val onApply: (editLayout: Boolean) -> Unit,
 ) {
     private val builder = AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
@@ -42,6 +45,8 @@ class SettingsDialog(
     private val root: View = View.inflate(builder.context, R.layout.dialog_settings, null)
     private val mode: Spinner = root.findViewById(R.id.mode)
     private val modeDescription: TextView = root.findViewById(R.id.mode_description)
+    private val antiDeadzoneLeftLabel: TextView = root.findViewById(R.id.anti_deadzone_left_label)
+    private val antiDeadzoneLeft: SeekBar = root.findViewById(R.id.anti_deadzone_left)
     private val antiDeadzoneLabel: TextView = root.findViewById(R.id.anti_deadzone_label)
     private val antiDeadzone: SeekBar = root.findViewById(R.id.anti_deadzone)
     private val curveLabel: TextView = root.findViewById(R.id.curve_label)
@@ -54,16 +59,28 @@ class SettingsDialog(
     private val gyroInvert: CheckBox = root.findViewById(R.id.gyro_invert)
     private val motionSensitivityLabel: TextView = root.findViewById(R.id.motion_sensitivity_label)
     private val motionSensitivity: SeekBar = root.findViewById(R.id.motion_sensitivity)
+    private val gyroSmoothingLabel: TextView = root.findViewById(R.id.gyro_smoothing_label)
+    private val gyroSmoothing: SeekBar = root.findViewById(R.id.gyro_smoothing)
+    private val calibrateGyro: Button = root.findViewById(R.id.calibrate_gyro)
     private val host: EditText = root.findViewById(R.id.host)
     private val port: EditText = root.findViewById(R.id.port)
     private val find: Button = root.findViewById(R.id.find)
     private val discoveryStatus: TextView = root.findViewById(R.id.discovery_status)
     private val servers: LinearLayout = root.findViewById(R.id.servers)
     private val rate: RadioGroup = root.findViewById(R.id.rate)
+    private val output: RadioGroup = root.findViewById(R.id.output)
     private val deadzoneLabel: TextView = root.findViewById(R.id.deadzone_label)
     private val deadzone: SeekBar = root.findViewById(R.id.deadzone)
+    private val deadzoneRightLabel: TextView = root.findViewById(R.id.deadzone_right_label)
+    private val deadzoneRight: SeekBar = root.findViewById(R.id.deadzone_right)
+    private val minPressLabel: TextView = root.findViewById(R.id.min_press_label)
+    private val minPress: SeekBar = root.findViewById(R.id.min_press)
     private val haptics: Switch = root.findViewById(R.id.haptics)
+    private val hapticIntensityLabel: TextView = root.findViewById(R.id.haptic_intensity_label)
+    private val hapticIntensity: SeekBar = root.findViewById(R.id.haptic_intensity)
     private val rumble: Switch = root.findViewById(R.id.rumble)
+    private val rumbleGainLabel: TextView = root.findViewById(R.id.rumble_gain_label)
+    private val rumbleGain: SeekBar = root.findViewById(R.id.rumble_gain)
     private val floating: Switch = root.findViewById(R.id.floating)
     private val dim: Switch = root.findViewById(R.id.dim)
     private val leftHanded: Switch = root.findViewById(R.id.left_handed)
@@ -80,6 +97,9 @@ class SettingsDialog(
     /** First run: the single PC found is filled in automatically. */
     private var autoFill = false
 
+    /** The PC last picked from the search or the recent list, so Save can remember its name. */
+    private var picked: KnownPcs.KnownPc? = null
+
     /** Feel edits per mode while the dialog is open (switching the spinner must not lose them). */
     private val feels = HashMap<String, Settings.ModeFeel>()
     private var shownMode: GameMode = GameModes.byId(settings.modeId)
@@ -87,11 +107,33 @@ class SettingsDialog(
     init {
         mode.adapter = ArrayAdapter(root.context, android.R.layout.simple_spinner_item, GameModes.ALL.map { it.title })
             .apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        antiDeadzoneLeft.max = Settings.MAX_ANTI_DEADZONE_PERCENT
         antiDeadzone.max = Settings.MAX_ANTI_DEADZONE_PERCENT
         curve.max = Settings.MAX_CURVE_TENTHS - Settings.MIN_CURVE_TENTHS
         sensitivity.max = (Settings.MAX_SENSITIVITY_PERCENT - Settings.MIN_SENSITIVITY_PERCENT) / SENSITIVITY_STEP
         motionSensitivity.max = (Settings.MAX_MOTION_SENSITIVITY_PERCENT - Settings.MIN_MOTION_SENSITIVITY_PERCENT) / SENSITIVITY_STEP
+        gyroSmoothing.max = Settings.MAX_GYRO_SMOOTHING_DEGREES
+        minPress.max = Settings.MAX_MIN_PRESS_MS / MIN_PRESS_STEP
+        hapticIntensity.max = Settings.MAX_HAPTIC_INTENSITY_PERCENT / PERCENT_STEP
+        rumbleGain.max = Settings.MAX_RUMBLE_GAIN_PERCENT / PERCENT_STEP
+        onProgress(antiDeadzoneLeft) { antiDeadzoneLeftLabel.text = activity.getString(R.string.settings_anti_deadzone_left, it) }
         onProgress(antiDeadzone) { antiDeadzoneLabel.text = activity.getString(R.string.settings_anti_deadzone, it) }
+        onProgress(gyroSmoothing) {
+            gyroSmoothingLabel.text = if (it == 0) {
+                activity.getString(R.string.settings_gyro_smoothing_off)
+            } else {
+                activity.getString(R.string.settings_gyro_smoothing, it)
+            }
+        }
+        onProgress(minPress) {
+            minPressLabel.text = if (it == 0) {
+                activity.getString(R.string.settings_min_press_off)
+            } else {
+                activity.getString(R.string.settings_min_press, it * MIN_PRESS_STEP)
+            }
+        }
+        onProgress(hapticIntensity) { hapticIntensityLabel.text = activity.getString(R.string.settings_haptic_intensity, it * PERCENT_STEP) }
+        onProgress(rumbleGain) { rumbleGainLabel.text = activity.getString(R.string.settings_rumble_gain, it * PERCENT_STEP) }
         onProgress(curve) {
             val tenths = it + Settings.MIN_CURVE_TENTHS
             curveLabel.text = if (tenths == Settings.MIN_CURVE_TENTHS) {
@@ -108,6 +150,7 @@ class SettingsDialog(
                 activity.getString(R.string.settings_motion_sensitivity, Settings.MIN_MOTION_SENSITIVITY_PERCENT + it * SENSITIVITY_STEP)
         }
         onProgress(deadzone) { deadzoneLabel.text = activity.getString(R.string.settings_deadzone, it) }
+        onProgress(deadzoneRight) { deadzoneRightLabel.text = activity.getString(R.string.settings_deadzone_right, it) }
 
         mode.setSelection(GameModes.ALL.indexOf(shownMode))
         showMode(shownMode)
@@ -126,6 +169,8 @@ class SettingsDialog(
         gyroWhileAiming.isChecked = settings.gyroWhileAiming
         gyroInvert.isChecked = settings.gyroInvertY
         motionSensitivity.progress = (settings.motionSensitivityPercent - Settings.MIN_MOTION_SENSITIVITY_PERCENT) / SENSITIVITY_STEP
+        gyroSmoothing.progress = settings.gyroSmoothingDegrees
+        calibrateGyro.setOnClickListener { onCalibrateGyro() }
 
         host.setText(settings.host)
         port.setText(digits(settings.port))
@@ -137,16 +182,29 @@ class SettingsDialog(
                 else -> View.NO_ID
             },
         )
+        output.check(
+            when (settings.outputPreference) {
+                Protocol.OUTPUT_XBOX360 -> R.id.output_xbox
+                Protocol.OUTPUT_DS4 -> R.id.output_ds4
+                else -> R.id.output_auto
+            },
+        )
         deadzone.max = Settings.MAX_DEADZONE_PERCENT
         deadzone.progress = settings.deadzonePercent
+        deadzoneRight.max = Settings.MAX_DEADZONE_PERCENT
+        deadzoneRight.progress = settings.deadzoneRightPercent
+        minPress.progress = settings.minPressMs / MIN_PRESS_STEP
         haptics.isChecked = settings.haptics
+        hapticIntensity.progress = settings.hapticIntensityPercent / PERCENT_STEP
         rumble.isChecked = settings.rumble
+        rumbleGain.progress = settings.rumbleGainPercent / PERCENT_STEP
         floating.isChecked = settings.floatingButtons
         dim.isChecked = settings.dimScreen
         leftHanded.isChecked = settings.leftHanded
         autoMode.isChecked = settings.autoMode
 
         find.setOnClickListener { startDiscovery() }
+        showRecent()
         dialog.setOnShowListener {
             // Replace the auto-dismissing handlers so invalid input keeps the dialog open.
             dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener { if (commit()) close(editLayout = false) }
@@ -177,6 +235,7 @@ class SettingsDialog(
     private fun showMode(m: GameMode) {
         modeDescription.text = activity.getString(R.string.mode_description, m.bestFor, m.tips)
         val feel = feels[m.id] ?: settings.feel(m)
+        antiDeadzoneLeft.progress = feel.antiDeadzoneLeftPercent
         antiDeadzone.progress = feel.antiDeadzonePercent
         curve.progress = feel.curveTenths - Settings.MIN_CURVE_TENTHS
         sensitivity.progress = (feel.sensitivityPercent - Settings.MIN_SENSITIVITY_PERCENT) / SENSITIVITY_STEP
@@ -197,11 +256,17 @@ class SettingsDialog(
 
     private fun updateMotionOptions() {
         val gyro = shownMode.motion == GameMode.MOTION_AIM
-        gyroWhileAiming.visibility = if (gyro) View.VISIBLE else View.GONE
-        gyroInvert.visibility = if (gyro) View.VISIBLE else View.GONE
+        val gyroVisibility = if (gyro) View.VISIBLE else View.GONE
+        gyroWhileAiming.visibility = gyroVisibility
+        gyroInvert.visibility = gyroVisibility
+        gyroSmoothingLabel.visibility = gyroVisibility
+        gyroSmoothing.visibility = gyroVisibility
+        // Calibration works in any mode (it starts the gyroscope itself), but only means something here.
+        calibrateGyro.visibility = if (gyro && motionAvailable(GameMode.MOTION_AIM)) View.VISIBLE else View.GONE
         val on = motion.isEnabled && motion.isChecked
         gyroWhileAiming.isEnabled = on
         gyroInvert.isEnabled = on
+        gyroSmoothing.isEnabled = on
         motionSensitivity.isEnabled = on
     }
 
@@ -211,6 +276,7 @@ class SettingsDialog(
         Settings.MIN_SENSITIVITY_PERCENT + sensitivity.progress * SENSITIVITY_STEP,
         // A mode without motion (or a phone without the sensor) keeps whatever was stored before.
         if (motion.isEnabled) motion.isChecked else settings.feel(m).motion,
+        antiDeadzoneLeft.progress,
     )
 
     private inline fun onProgress(bar: SeekBar, crossinline show: (Int) -> Unit) {
@@ -238,30 +304,42 @@ class SettingsDialog(
         } else {
             activity.resources.getQuantityString(R.plurals.discovery_found, found.size, found.size)
         }
+        for (server in found) {
+            addRow(activity.getString(R.string.discovery_row, server.name, server.host, server.port, server.padsInUse, server.maxPads)) {
+                pick(KnownPcs.KnownPc(server.name, server.host, server.port))
+            }
+        }
+        if (autoFill && found.size == 1) pick(KnownPcs.KnownPc(found[0].name, found[0].host, found[0].port))
+        autoFill = false
+    }
+
+    /** PCs this phone used before, one tap each (a search replaces them with what it finds). */
+    private fun showRecent() {
+        for (pc in settings.knownPcs.all) {
+            addRow(activity.getString(R.string.recent_pc, pc.name.ifEmpty { pc.host }, pc.host, pc.port)) { pick(pc) }
+        }
+    }
+
+    private fun addRow(label: String, onClick: () -> Unit) {
         val pad = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10f, activity.resources.displayMetrics).toInt()
         val selectable = TypedValue().also {
             root.context.theme.resolveAttribute(android.R.attr.selectableItemBackground, it, true)
         }
-        for (server in found) {
-            servers.addView(
-                TextView(root.context).apply {
-                    text = activity.getString(
-                        R.string.discovery_row, server.name, server.host, server.port, server.padsInUse, server.maxPads,
-                    )
-                    setPadding(pad, pad, pad, pad)
-                    if (selectable.resourceId != 0) setBackgroundResource(selectable.resourceId)
-                    setOnClickListener { pick(server) }
-                },
-            )
-        }
-        if (autoFill && found.size == 1) pick(found[0])
-        autoFill = false
+        servers.addView(
+            TextView(root.context).apply {
+                text = label
+                setPadding(pad, pad, pad, pad)
+                if (selectable.resourceId != 0) setBackgroundResource(selectable.resourceId)
+                setOnClickListener { onClick() }
+            },
+        )
     }
 
-    private fun pick(server: Discovery.Server) {
-        host.setText(server.host)
+    private fun pick(pc: KnownPcs.KnownPc) {
+        picked = pc
+        host.setText(pc.host)
         host.error = null
-        port.setText(digits(server.port))
+        port.setText(digits(pc.port))
         port.error = null
     }
 
@@ -285,6 +363,13 @@ class SettingsDialog(
         feels[shownMode.id] = readFeel(shownMode)
         for ((id, feel) in feels) settings.saveFeel(GameModes.byId(id), feel)
         settings.modeId = shownMode.id
+        // The PC's name follows a pick; an address typed by hand has none until the phone connects and learns it.
+        val pc = picked
+        if (pc != null && pc.host == h && pc.port == p) {
+            settings.serverName = pc.name
+        } else if (h != settings.host || p != settings.port) {
+            settings.serverName = ""
+        }
         settings.host = h
         settings.port = p
         settings.rateHz = when (rate.checkedRadioButtonId) {
@@ -293,9 +378,19 @@ class SettingsDialog(
             R.id.rate_120 -> 120
             else -> settings.rateHz
         }
+        settings.outputPreference = when (output.checkedRadioButtonId) {
+            R.id.output_xbox -> Protocol.OUTPUT_XBOX360
+            R.id.output_ds4 -> Protocol.OUTPUT_DS4
+            else -> Protocol.OUTPUT_NONE
+        }
         settings.deadzonePercent = deadzone.progress
+        settings.deadzoneRightPercent = deadzoneRight.progress
+        settings.minPressMs = minPress.progress * MIN_PRESS_STEP
         settings.haptics = haptics.isChecked
+        settings.hapticIntensityPercent = hapticIntensity.progress * PERCENT_STEP
         settings.rumble = rumble.isChecked
+        settings.rumbleGainPercent = rumbleGain.progress * PERCENT_STEP
+        settings.gyroSmoothingDegrees = gyroSmoothing.progress
         settings.floatingButtons = floating.isChecked
         settings.dimScreen = dim.isChecked
         settings.leftHanded = leftHanded.isChecked
@@ -309,5 +404,7 @@ class SettingsDialog(
 
     private companion object {
         const val SENSITIVITY_STEP = 10
+        const val MIN_PRESS_STEP = 5
+        const val PERCENT_STEP = 10
     }
 }

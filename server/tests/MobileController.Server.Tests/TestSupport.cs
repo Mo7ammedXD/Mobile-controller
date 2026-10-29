@@ -4,10 +4,12 @@ using System.Net.Sockets;
 
 namespace MobileController.Server.Tests;
 
-internal sealed class FakePad(PadFeedbackHandler onFeedback, bool recordHistory) : IVirtualPad
+internal sealed class FakePad(PadKind kind, PadFeedbackHandler onFeedback, bool recordHistory) : IVirtualPad
 {
     private readonly List<PadState> _history = [];
     private volatile bool _disposed;
+
+    public PadKind Kind => kind;
 
     public int SubmitCount { get; private set; }
     public PadState Last { get; private set; }
@@ -41,10 +43,10 @@ internal sealed class FakePadFactory(bool recordHistory = true) : IVirtualPadFac
         get { lock (_gate) return [.. _pads]; }
     }
 
-    public IVirtualPad Create(PadFeedbackHandler onFeedback)
+    public IVirtualPad Create(PadKind kind, PadFeedbackHandler onFeedback)
     {
         if (Fail) throw new InvalidOperationException("simulated plug-in failure");
-        var pad = new FakePad(onFeedback, recordHistory);
+        var pad = new FakePad(kind, onFeedback, recordHistory);
         lock (_gate) _pads.Add(pad);
         return pad;
     }
@@ -68,6 +70,8 @@ internal sealed class ServerHarness : IDisposable
         DisconnectTimeoutMs = 60_000,
         FeedbackIntervalMs = 60_000,
         GameIntervalMs = 60_000,
+        // Clients without STATUS get their pad at the first INPUT, as before STATUS existed.
+        StatusWaitMs = 0,
     };
 
     private int _foregroundQueries;
@@ -161,6 +165,17 @@ internal sealed class TestClient : IDisposable
         Span<byte> packet = stackalloc byte[Protocol.ByeSize];
         Protocol.WriteBye(packet);
         Socket.Send(packet);
+    }
+
+    public void SendStatus(ulong deviceId, string deviceName = "Phone", byte battery = 50,
+        OutputPreference output = OutputPreference.None, string profile = "Classic")
+    {
+        Span<byte> name = stackalloc byte[Protocol.MaxStatusFieldBytes];
+        Span<byte> profileName = stackalloc byte[Protocol.MaxStatusFieldBytes];
+        Span<byte> packet = stackalloc byte[Protocol.MaxStatusSize];
+        int length = Protocol.WriteStatus(packet, deviceId, battery, StatusFlags.None, 42, 120, output, 3,
+            name[..Protocol.EncodeName(deviceName, name)], profileName[..Protocol.EncodeName(profile, profileName)]);
+        Socket.Send(packet[..length]);
     }
 
     public byte[]? Receive(int timeoutMs = 1000)

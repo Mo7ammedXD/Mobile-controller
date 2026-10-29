@@ -8,11 +8,34 @@ namespace MobileController.Server;
 internal sealed class ViGEmPadFactory : IVirtualPadFactory
 {
     private readonly ViGEmClient _client = new();
+    private readonly Lock _gate = new();
+    private readonly List<ViGEmDs4Pad> _ds4 = [];
 
-    public IVirtualPad Create(PadFeedbackHandler onFeedback) => new ViGEmPad(_client.CreateXbox360Controller(), onFeedback);
+    public IVirtualPad Create(PadKind kind, PadFeedbackHandler onFeedback)
+    {
+        if (kind != PadKind.DualShock4) return new ViGEmXbox360Pad(_client.CreateXbox360Controller(), onFeedback);
+        var pad = new ViGEmDs4Pad(_client.CreateDualShock4Controller(), onFeedback);
+        lock (_gate)
+        {
+            _ds4.RemoveAll(p => p.Finished);
+            _ds4.Add(pad);
+        }
+        return pad;
+    }
 
     /// <summary>Closing the bus handle also makes the driver unplug any pad this process still owns.</summary>
-    public void Dispose() => _client.Dispose();
+    public void Dispose()
+    {
+        // A DS4's output thread may still be waiting on the bus (at most one poll interval): let it finish first.
+        ViGEmDs4Pad[] pads;
+        lock (_gate) pads = [.. _ds4];
+        foreach (var pad in pads)
+        {
+            pad.Dispose();
+            pad.WaitFinished(TimeSpan.FromSeconds(1));
+        }
+        _client.Dispose();
+    }
 
     /// <summary>
     /// The wrapper turns unmapped VIGEM_ERROR codes (e.g. VIGEM_ERROR_WINAPI while plugging in) into
@@ -23,14 +46,43 @@ internal sealed class ViGEmPadFactory : IVirtualPadFactory
         e is System.ComponentModel.Win32Exception { NativeErrorCode: 0 }
             ? "ViGEmBus reported an unspecified error (usually transient, e.g. while Windows sets up a new device)"
             : $"{e.Message} ({e.GetType().Name})";
+
+    /// <summary>Connects <paramref name="pad"/>, disposing it if that fails.</summary>
+    internal static void Connect(IVirtualGamepad pad, Action unsubscribe)
+    {
+        try
+        {
+            pad.Connect();
+        }
+        catch
+        {
+            unsubscribe();
+            (pad as IDisposable)?.Dispose();
+            throw;
+        }
+    }
+
+    internal static void Disconnect(IVirtualGamepad pad)
+    {
+        try
+        {
+            // The wrapper's Dispose only frees the native target; Disconnect is what unplugs it (and unregisters the
+            // notification callback).
+            pad.Disconnect();
+        }
+        finally
+        {
+            (pad as IDisposable)?.Dispose();
+        }
+    }
 }
 
-internal sealed class ViGEmPad : IVirtualPad
+internal sealed class ViGEmXbox360Pad : IVirtualPad
 {
     private readonly IXbox360Controller _pad;
     private readonly PadFeedbackHandler _onFeedback;
 
-    public ViGEmPad(IXbox360Controller pad, PadFeedbackHandler onFeedback)
+    public ViGEmXbox360Pad(IXbox360Controller pad, PadFeedbackHandler onFeedback)
     {
         _pad = pad;
         _onFeedback = onFeedback;
@@ -38,17 +90,10 @@ internal sealed class ViGEmPad : IVirtualPad
         pad.AutoSubmitReport = false;
         // Subscribe before Connect: the driver reports the player LED right after plug-in.
         pad.FeedbackReceived += OnFeedbackReceived;
-        try
-        {
-            pad.Connect();
-        }
-        catch
-        {
-            pad.FeedbackReceived -= OnFeedbackReceived;
-            (pad as IDisposable)?.Dispose();
-            throw;
-        }
+        ViGEmPadFactory.Connect(pad, () => pad.FeedbackReceived -= OnFeedbackReceived);
     }
+
+    public PadKind Kind => PadKind.Xbox360;
 
     public void Submit(in PadState state)
     {
@@ -67,16 +112,7 @@ internal sealed class ViGEmPad : IVirtualPad
     public void Dispose()
     {
         _pad.FeedbackReceived -= OnFeedbackReceived;
-        try
-        {
-            // The wrapper's Dispose only frees the native target; Disconnect is what unplugs it (and unregisters the
-            // notification callback).
-            _pad.Disconnect();
-        }
-        finally
-        {
-            (_pad as IDisposable)?.Dispose();
-        }
+        ViGEmPadFactory.Disconnect(_pad);
     }
 
     private void OnFeedbackReceived(object sender, Xbox360FeedbackReceivedEventArgs e)
@@ -91,5 +127,125 @@ internal sealed class ViGEmPad : IVirtualPad
         {
             // Feedback is best effort; the 100 ms heartbeat resends the current state anyway.
         }
+    }
+}
+
+/// <summary>
+/// A virtual DualShock 4: the phone's Xbox-layout report mapped by <see cref="Ds4Mapping"/>.
+///
+/// Rumble comes back as the game's raw HID output reports. The wrapper's DS4 FeedbackReceived event is deprecated
+/// ("might not behave as expected"), so a small thread per pad waits for those reports instead and reads the motor
+/// bytes. That thread (not the receive thread) also frees the native target once it stopped waiting, so unplugging
+/// never blocks the input loop and nothing calls into a freed handle.
+/// </summary>
+internal sealed class ViGEmDs4Pad : IVirtualPad
+{
+    private const int OutputPollMs = 100;
+
+    private readonly IDualShock4Controller _pad;
+    private readonly PadFeedbackHandler _onFeedback;
+    private readonly ManualResetEventSlim _finished = new();
+    private volatile bool _disposed;
+
+    public ViGEmDs4Pad(IDualShock4Controller pad, PadFeedbackHandler onFeedback)
+    {
+        _pad = pad;
+        _onFeedback = onFeedback;
+        pad.AutoSubmitReport = false;
+        ViGEmPadFactory.Connect(pad, () => { });
+        new Thread(ReadOutputReports) { IsBackground = true, Name = "DS4 output reports", Priority = ThreadPriority.AboveNormal }.Start();
+    }
+
+    /// <summary>The output thread has freed the native target.</summary>
+    public bool Finished => _finished.IsSet;
+
+    public void WaitFinished(TimeSpan timeout) => _finished.Wait(timeout);
+
+    public PadKind Kind => PadKind.DualShock4;
+
+    public void Submit(in PadState state)
+    {
+        var r = Ds4Mapping.Map(state);
+        // SetButtonsFull and SetSpecialButtonsFull are plain stores into the wrapper's DS4_REPORT (the word includes
+        // the D-pad hat in its low nibble), the rest are ref-returning fields: one driver call, no allocation.
+        _pad.SetButtonsFull(r.Buttons);
+        _pad.SetSpecialButtonsFull(r.Special);
+        _pad.LeftTrigger = r.LeftTrigger;
+        _pad.RightTrigger = r.RightTrigger;
+        _pad.LeftThumbX = r.ThumbLX;
+        _pad.LeftThumbY = r.ThumbLY;
+        _pad.RightThumbX = r.ThumbRX;
+        _pad.RightThumbY = r.ThumbRY;
+        _pad.SubmitReport();
+    }
+
+    /// <summary>Unplugs at once; the output thread frees the native target when it notices. Safe to call twice.</summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        try
+        {
+            _pad.Disconnect();
+        }
+        catch (Exception)
+        {
+            // Already gone (the bus closed, or the device was removed): nothing left to unplug.
+        }
+    }
+
+    private void ReadOutputReports()
+    {
+        try
+        {
+            while (!_disposed)
+            {
+                byte[] report;
+                try
+                {
+                    var raw = _pad.AwaitRawOutputReport(OutputPollMs, out bool timedOut);
+                    if (timedOut || _disposed) continue;
+                    report = raw as byte[] ?? raw.ToArray();
+                }
+                catch (Exception) when (!_disposed)
+                {
+                    // The driver refused this wait (e.g. while Windows sets the device up); rumble is best effort.
+                    Thread.Sleep(OutputPollMs);
+                    continue;
+                }
+                if (TryReadMotors(report, out byte large, out byte small))
+                {
+                    // No XInput user index exists for a DS4: the phone shows no player number for it.
+                    _onFeedback(large, small, Protocol.UnknownPlayer);
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Unplugged while waiting, or a feedback handler bug: either way this pad's rumble is over.
+        }
+        finally
+        {
+            (_pad as IDisposable)?.Dispose();
+            _finished.Set();
+        }
+    }
+
+    /// <summary>
+    /// The motor bytes of a DS4 output report, if it sets them: USB report 0x05 has its flags at 1 and the light (right)
+    /// and heavy (left) motor at 4 and 5; the Bluetooth layout 0x11 has them at 3, 6 and 7. A report that only changes
+    /// the light bar (flag bit 0 clear) leaves the rumble alone.
+    /// </summary>
+    internal static bool TryReadMotors(ReadOnlySpan<byte> report, out byte large, out byte small)
+    {
+        (int flags, int light, int heavy) = report.Length > 0 && report[0] == 0x11 ? (3, 6, 7) : (1, 4, 5);
+        if (report.Length <= heavy || (report[flags] & 0x01) == 0)
+        {
+            large = small = 0;
+            return false;
+        }
+        large = report[heavy];
+        small = report[light];
+        return true;
     }
 }

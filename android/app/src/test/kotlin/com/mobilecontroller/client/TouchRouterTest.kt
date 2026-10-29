@@ -3,6 +3,7 @@ package com.mobilecontroller.client
 import com.mobilecontroller.client.input.TouchRouter
 import com.mobilecontroller.client.protocol.Protocol
 import com.mobilecontroller.client.ui.ControlLayout
+import com.mobilecontroller.client.ui.GameModes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -179,6 +180,65 @@ class TouchRouterTest {
         snap()
         val lx = Protocol.i16(out, 8)
         assertTrue("lx=$lx", lx in 8192..9500)
+    }
+
+    @Test
+    fun fixedStickDeflectsFromItsDrawnCentre() {
+        val ls = id("LS")
+        val r = layout.r[ls]
+        router.anchor[0] = TouchRouter.ANCHOR_FIXED
+        // Landing half a radius right of the drawn centre is already half deflection.
+        router.down(0, layout.x[ls] + 0.5f * r, layout.y[ls])
+        snap()
+        assertTrue(Protocol.i16(out, 8) in 15000..17500)
+        assertEquals(layout.x[ls], router.stickX[ls], 0f)
+    }
+
+    @Test
+    fun followStickDragsItsCentreAlong() {
+        val ls = id("LS")
+        val r = layout.r[ls]
+        router.anchor[0] = TouchRouter.ANCHOR_FOLLOW
+        val x0 = layout.x[ls]
+        val y0 = layout.y[ls]
+        router.down(0, x0, y0)
+        router.move(0, x0 + 3 * r, y0)
+        // The centre followed to one radius behind the thumb...
+        assertEquals(x0 + 2 * r, router.stickX[ls], 0.5f)
+        // ...so reversing direction is a short move: one radius back is neutral again.
+        router.move(0, x0 + 2 * r, y0)
+        snap()
+        assertEquals(0, Protocol.i16(out, 8))
+        router.move(0, x0 + r, y0)
+        snap()
+        assertEquals(-32767, Protocol.i16(out, 8))
+    }
+
+    @Test
+    fun invertFlipsOnlyThatStick() {
+        val rs = id("RS")
+        val r = layout.r[rs]
+        router.invertY[1] = true
+        router.down(0, layout.x[rs], layout.y[rs])
+        router.move(0, layout.x[rs] + r, layout.y[rs] - r)
+        snap()
+        assertTrue(Protocol.i16(out, 12) > 20000)
+        assertTrue(Protocol.i16(out, 14) < -20000)
+    }
+
+    @Test
+    fun edgeRingRadiusIsAdjustable() {
+        val l = ControlLayout().apply { load(GameModes.FOOTBALL); place(0f, 0f, 2400f, 1080f) }
+        val football = TouchRouter(l, GamepadState())
+        val move = l.indexOf("MOVE")
+        val r = l.r[move]
+        football.down(0, l.x[move], l.y[move])
+        football.move(0, l.x[move] + 1.25f * r, l.y[move])
+        assertFalse(football.edgeOn[move])
+        football.edgeOnRadius = 1.2f
+        football.edgeOffRadius = 1.1f
+        football.move(0, l.x[move] + 1.25f * r, l.y[move])
+        assertTrue(football.edgeOn[move])
     }
 
     @Test
