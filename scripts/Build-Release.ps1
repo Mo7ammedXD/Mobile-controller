@@ -45,7 +45,8 @@ New-Item -ItemType Directory -Force $dist | Out-Null
 if (-not $SkipWindows) {
     $app = Join-Path $dist 'MobileController-Windows-x64'
     if (Test-Path $app) { Remove-Item $app -Recurse -Force }
-    $dotnetVersion = if ($Version) { @("-p:Version=$Version") } else { @() }
+    # @() outside the if: assigning an if's single result unwraps it to a string, which splats one character per argument.
+    $dotnetVersion = @(if ($Version) { "-p:Version=$Version" })
     # The desktop app starts MobileController.Server.exe from its own folder, so both are published into one.
     foreach ($project in 'MobileController.Desktop', 'MobileController.Server') {
         dotnet publish (Join-Path $root "server\src\$project") -c Release --self-contained -o $app @dotnetVersion
@@ -69,7 +70,7 @@ if (-not $SkipAndroid) {
     if (-not $env:ANDROID_HOME -and -not (Test-Path (Join-Path $android 'local.properties')) -and (Test-Path $studioSdk)) {
         $env:ANDROID_HOME = $studioSdk
     }
-    $gradleVersion = if ($Version) { @("-PreleaseVersion=$Version") } else { @() }
+    $gradleVersion = @(if ($Version) { "-PreleaseVersion=$Version" })
     & (Join-Path $android 'gradlew.bat') -p $android :app:assembleRelease @gradleVersion
     if ($LASTEXITCODE) { throw 'Building the APK failed.' }
     $apk = Join-Path $dist 'MobileController.apk'
