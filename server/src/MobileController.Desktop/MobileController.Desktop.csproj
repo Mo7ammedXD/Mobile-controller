@@ -20,6 +20,9 @@
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <!-- Required by the LibraryImport source generator (job object). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- WPF bindings look up the culture of their xml:lang (en-US by default). Under invariant globalization that lookup
+         throws unless cultures may be created on demand, and the main window fails to load. -->
+    <PredefinedCulturesOnly>false</PredefinedCulturesOnly>
   </PropertyGroup>
 
   <ItemGroup>
