@@ -43,7 +43,7 @@ install and connect them.
 
 ## How it works
 
-![Diagram: the phone sends INPUT and STATUS packets over UDP to the server on the PC and receives FEEDBACK and COMMAND packets. The server feeds the ViGEmBus driver, which presents a virtual Xbox 360 or DualShock 4 controller to the game. The desktop app talks to the server over named pipes and writes its settings file.](docs/img/how-it-works.svg)
+![Diagram: the phone sends INPUT and STATUS packets over UDP to the server on the PC and receives FEEDBACK and COMMAND packets. The server feeds the ViGEmBus driver, which presents a virtual Xbox 360 or DualShock 4 controller to the game. The desktop app talks to the server over named pipes and writes its settings file.](docs/img/how-it-works.png)
 
 1. **The phone draws the controller and reads your thumbs.** Touches, the gyroscope and tilt are turned into one
    controller state: buttons, two sticks and two triggers. This path allocates no memory, so handling your input
@@ -115,9 +115,7 @@ looks the way it does.
 
 ### Settings
 
-![Illustration of the phone's settings screen, Sticks section: sections listed on the left; sensitivity and aim precision sliders; a response curve and a test stick](docs/img/phone-settings.svg)
-
-*Illustration drawn from the app's layout, not a screenshot.*
+![The phone's settings screen, Sticks section: sections listed on the left; the aim precision slider; a response curve and the Try it stick being dragged](docs/img/phone-settings.png)
 
 The gear opens the settings over the controller. The phone stays connected underneath, so the PC keeps its controller
 while you change things. Changes to feel, gyro and haptics apply as you make them: try a deadzone on the **Try it**
@@ -148,9 +146,7 @@ stick or feel a haptic strength with **Test**. **Done** (or Back) saves; **Cance
 
 ## The desktop app
 
-![Illustration of the desktop app's Dashboard: a health banner reading "2 controllers connected", navigation on the left, cards for the server, controllers and connection, and the connected phones](docs/img/desktop-dashboard.svg)
-
-*Illustration drawn from the app's layout, not a screenshot.*
+![The desktop app's Dashboard: a health banner reading "1 controller connected", navigation on the left, cards for the server, controllers and connection, and the connected phone](docs/img/desktop-dashboard.png)
 
 The banner at the top always says the one thing worth knowing right now, such as "Ready: waiting for a phone",
 "2 controllers connected" or "The controller driver is missing". When there is something to fix, it has a button
@@ -166,9 +162,9 @@ that fixes it.
 | **Settings** | Every server option in plain language, plus start with Windows, notifications and light or dark theme |
 | **Help** | What to try when the phone doesn't find the PC, the game doesn't react, or it lags |
 
-<img align="right" width="400" src="docs/img/desktop-controller-card.svg" alt="Illustration of one phone's card on the Controllers page: the live controller picture, latency, update rate, loss, jitter and battery, buttons for the controller type, a name field, and Identify, Test rumble and Disconnect buttons">
+<img align="right" width="400" src="docs/img/desktop-controller-card.png" alt="One phone's card on the Controllers page: the live controller picture with the left stick pushed, latency, update rate, loss, jitter and battery, buttons for the controller type, a name field, and Identify, Test rumble and Disconnect buttons">
 
-**A phone's card on the Controllers page** (illustrated on the right, drawn from the app's layout) shows:
+**A phone's card on the Controllers page** (on the right) shows:
 
 - What the game sees from that phone right now: sticks, triggers and every button lit while pressed, plus a bar while
   the game rumbles.
