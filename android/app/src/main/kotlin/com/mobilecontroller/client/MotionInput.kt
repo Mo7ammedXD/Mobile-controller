@@ -41,6 +41,12 @@ class MotionInput(context: Context, private val link: UdpLink) : SensorEventList
     @Volatile var sensitivity = 1f
     @Volatile var antiDeadzone = 0f
 
+    /**
+     * The settings screen or the layout editor is open: motion sends neutral, like the touch controls (PROTOCOL §12
+     * MENU_OPEN). The filter keeps running, so [preview] and calibration still work.
+     */
+    @Volatile var suppressed = false
+
     /** Gyro aiming filter and its settings (smoothing, calibration, axes). */
     val gyro = GyroFilter()
 
@@ -150,12 +156,12 @@ class MotionInput(context: Context, private val link: UdpLink) : SensorEventList
         val packed = gyro.process(wx, wy, wz, gx, gy, gz, rotation, timestamp)
         preview = packed
         if (mode != GameMode.MOTION_AIM) return
-        val out = if (open) packed else 0
+        val out = if (open && !suppressed) packed else 0
         if (link.state.setMotion(0, StickMath.unpackX(out), StickMath.unpackY(out))) link.wake()
     }
 
     private fun steer() {
-        val x = MotionMath.steer(gx, gy, gz, rotation, sensitivity, antiDeadzone)
+        val x = if (suppressed) 0 else MotionMath.steer(gx, gy, gz, rotation, sensitivity, antiDeadzone)
         if (link.state.setMotion(x, 0, 0)) link.wake()
     }
 

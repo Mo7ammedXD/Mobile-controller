@@ -101,6 +101,43 @@ public sealed class ViGEmIntegrationTests
         Assert.Contains("disconnected (bye) -> controller 1 unplugged", text);
     }
 
+    [Fact]
+    public void A_new_Xbox_pad_reads_centred_before_any_input()
+    {
+        ViGEmPadFactory factory;
+        try
+        {
+            factory = new ViGEmPadFactory();
+        }
+        catch (VigemBusNotFoundException)
+        {
+            Assert.Skip("ViGEmBus is not installed.");
+            return;
+        }
+        var taken = Enumerable.Range(0, XInput.MaxUsers).Where(i => XInput.GetState((uint)i, out _) == XInput.ErrorSuccess).ToHashSet();
+        if (taken.Count == XInput.MaxUsers)
+        {
+            factory.Dispose();
+            Assert.Skip("All four XInput slots are taken by other controllers.");
+        }
+        using (factory)
+        using (factory.Create(PadKind.Xbox360, (_, _, _) => { }))
+        {
+            // Nothing is submitted here: a phone whose first state is neutral never changes the pad's report either.
+            int index = -1;
+            var watch = Stopwatch.StartNew();
+            while (index < 0 && watch.ElapsedMilliseconds < 3000)
+                index = Enumerable.Range(0, XInput.MaxUsers).FirstOrDefault(i => !taken.Contains(i) && XInput.GetState((uint)i, out _) == XInput.ErrorSuccess, -1);
+            Assert.True(index >= 0, "the virtual pad never showed up in XInput");
+            // Primed at plug-in and again once Windows assigns the player: centred within moments (unprimed, never).
+            XInput.State state = default;
+            watch.Restart();
+            while (watch.ElapsedMilliseconds < 1000 && (XInput.GetState((uint)index, out state) != XInput.ErrorSuccess || state.Gamepad != default))
+                Thread.Sleep(10);
+            Assert.Equal(default(PadState), state.Gamepad);
+        }
+    }
+
     /// <summary>
     /// The fake pads of the allocation test cannot show what the real wrapper does; this proves that submitting to a real
     /// virtual DualShock 4 allocates nothing either. (XInput cannot see a DS4, so its input is not read back here.)

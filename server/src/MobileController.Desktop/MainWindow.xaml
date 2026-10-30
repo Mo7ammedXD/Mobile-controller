@@ -106,8 +106,14 @@
 
         <!-- Status line: the result of the last action, and versions. -->
         <Grid Grid.Row="2" Margin="16,0,16,10">
-            <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" />
-            <TextBlock Text="{Binding ServerVersionText}" Style="{StaticResource Caption}" HorizontalAlignment="Right" />
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <!-- Caption wraps; one line with an ellipsis keeps a long message clear of the versions. -->
+            <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource Caption}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                       ToolTip="{Binding StatusMessage}" />
+            <TextBlock Grid.Column="1" Text="{Binding ServerVersionText}" Style="{StaticResource Caption}" Margin="16,0,0,0" />
         </Grid>
     </Grid>
 </Window>

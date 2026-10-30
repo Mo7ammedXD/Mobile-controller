@@ -114,16 +114,27 @@ public sealed class SettingsViewModel : ObservableObject
         }
     }
 
+    /// <summary>Starts a change from the file as it is now, so edits made by hand since the app started are kept.</summary>
+    private void Reread()
+    {
+        var file = ReadFile(out string? problem);
+        if (problem is null) _file = file;
+    }
+
     private void DoSave()
     {
         Saved = null;
+        Reread();
         if (!TryBuild(out var next, out string? error))
         {
             Error = error;
             return;
         }
         Error = null;
-        bool serverChanged = ServerSettings.ToJson(next) != ServerSettings.ToJson(_file);
+        // TryBuild always stamps the schema: a file without one (or no file yet) is not a change worth a restart.
+        var current = _file.Clone();
+        current.Schema ??= ServerSettings.CurrentSchema;
+        bool serverChanged = ServerSettings.ToJson(next) != ServerSettings.ToJson(current);
         if (serverChanged && !TryWrite(next)) return;
         _file = next;
 
@@ -222,9 +233,13 @@ public sealed class SettingsViewModel : ObservableObject
     public DeviceSettings? Device(string deviceId) =>
         _file.Devices?.FirstOrDefault(d => string.Equals(d.Id, deviceId, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Stores a phone's name and/or pad kind (null alias / output = unchanged; "" = cleared). Takes effect at once.</summary>
-    public void SetDevice(string deviceId, string? alias = null, string? output = null)
+    /// <summary>
+    /// Stores a phone's name and/or pad kind (null alias / output = unchanged; "" = cleared). Takes effect at once.
+    /// Returns false, with the reason in <see cref="Error"/>, when the file could not be written.
+    /// </summary>
+    public bool SetDevice(string deviceId, string? alias = null, string? output = null)
     {
+        Reread();
         var next = _file.Clone();
         next.Devices ??= [];
         var device = next.Devices.FirstOrDefault(d => string.Equals(d.Id, deviceId, StringComparison.OrdinalIgnoreCase));
@@ -237,6 +252,8 @@ public sealed class SettingsViewModel : ObservableObject
         if (output is not null) device.Output = output.Length == 0 ? null : output;
         if (device.Alias is null && device.Output is null && device.Unknown is null) next.Devices.Remove(device);
         if (next.Devices.Count == 0) next.Devices = null;
-        if (TryWrite(next)) _file = next;
+        if (!TryWrite(next)) return false;
+        _file = next;
+        return true;
     }
 }

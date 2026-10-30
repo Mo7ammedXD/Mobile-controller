@@ -100,12 +100,16 @@
 
                                 <!-- Name -->
                                 <TextBlock Text="Name on this PC" Style="{StaticResource FormLabel}" />
-                                <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="Rename" Command="{Binding Rename}"
-                                            CommandParameter="{Binding Text, ElementName=AliasBox}" Margin="8,0,0,0" Padding="12,4" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
                                     <TextBox x:Name="AliasBox" Text="{Binding AliasDraft, UpdateSourceTrigger=PropertyChanged}" MaxLength="40"
                                              AutomationProperties.Name="Name on this PC" />
-                                </DockPanel>
+                                    <Button Grid.Column="1" Content="Rename" Command="{Binding Rename}"
+                                            CommandParameter="{Binding Text, ElementName=AliasBox}" Margin="8,0,0,0" Padding="12,4" />
+                                </Grid>
 
                                 <!-- Actions -->
                                 <StackPanel Orientation="Horizontal" Margin="0,14,0,0">

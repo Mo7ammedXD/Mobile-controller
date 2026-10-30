@@ -18,9 +18,11 @@
             <TextBox Text="{Binding LogSearch, UpdateSourceTrigger=PropertyChanged}" Width="260" Margin="0,0,8,0"
                      AutomationProperties.Name="Search the log" ToolTip="Search" />
             <CheckBox x:Name="Follow" Content="Follow new lines" IsChecked="True" VerticalAlignment="Center" Margin="4,0,16,0" />
-            <Button DockPanel.Dock="Right" Content="Open folder" Command="{Binding OpenLogFolderCommand}" Padding="12,4" Margin="8,0,0,0" />
-            <Button DockPanel.Dock="Right" Content="Clear view" Command="{Binding ClearLogCommand}" Padding="12,4" Margin="8,0,0,0" />
-            <Button DockPanel.Dock="Right" Content="Copy" Command="{Binding CopyLogCommand}" Padding="12,4" />
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Content="Copy" Command="{Binding CopyLogCommand}" Padding="12,4" />
+                <Button Content="Clear view" Command="{Binding ClearLogCommand}" Padding="12,4" Margin="8,0,0,0" />
+                <Button Content="Open folder" Command="{Binding OpenLogFolderCommand}" Padding="12,4" Margin="8,0,0,0" />
+            </StackPanel>
         </DockPanel>
         <ListView x:Name="Lines" Grid.Row="2" ItemsSource="{Binding LogsView}" VirtualizingPanel.IsVirtualizing="True"
                   VirtualizingPanel.VirtualizationMode="Recycling" FontFamily="Cascadia Mono, Consolas" FontSize="12">

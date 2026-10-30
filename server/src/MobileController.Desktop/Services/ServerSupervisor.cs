@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Threading;
+using MobileController.Control;
 
 namespace MobileController.Desktop.Services;
 
@@ -27,7 +28,7 @@ public sealed partial class ServerSupervisor : ObservableObject, IDisposable
     // Exit codes of MobileController.Server (Program.cs).
     private const int ExitFailure = 1;
     private const int ExitBadArguments = 2;
-    private const int ExitViGEm = 3;
+    internal const int ExitViGEm = 3;
     private const int ExitNetwork = 4;
 
     private static readonly TimeSpan[] RestartDelays = [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(10)];
@@ -40,6 +41,7 @@ public sealed partial class ServerSupervisor : ObservableObject, IDisposable
     private string? _problem;
     private int? _exitCode;
     private int _crashes;
+    private bool _portRetried;
     private DispatcherTimer? _restartTimer;
     private bool _disposed;
 
@@ -74,6 +76,9 @@ public sealed partial class ServerSupervisor : ObservableObject, IDisposable
         private set => Set(ref _exitCode, value);
     }
 
+    /// <summary>The server stopped because it could not reach the ViGEmBus driver.</summary>
+    public bool DriverMissing => State == ServerState.Exited && ExitCode == ExitViGEm;
+
     /// <summary>The last lines the server wrote to its error output.</summary>
     public string ErrorOutput
     {
@@ -107,7 +112,14 @@ public sealed partial class ServerSupervisor : ObservableObject, IDisposable
         info.ArgumentList.Add("--control-pipe");
         info.ArgumentList.Add(PipeName);
         info.ArgumentList.Add("--exit-with-pipe");
-        info.ArgumentList.Add("--log-file");
+        // The app keeps a log file by default. Options on the command line win over server.json, so when the file
+        // decides (logToFile / logFilePath) the option is left to it.
+        var file = ReadSettingsFile();
+        if (file?.LogToFile is null)
+        {
+            info.ArgumentList.Add("--log-file");
+            if (file?.LogFilePath is { Length: > 0 } logPath) info.ArgumentList.Add(logPath);
+        }
         var process = new Process { StartInfo = info, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, _) => { }; // the log arrives through the pipe; just keep the pipe drained
         process.ErrorDataReceived += (_, e) =>
@@ -145,6 +157,7 @@ public sealed partial class ServerSupervisor : ObservableObject, IDisposable
     {
         if (State == ServerState.Starting) State = ServerState.Running;
         _crashes = 0;
+        _portRetried = false;
     }
 
     /// <summary>Stops the server (it exits on its own once the pipe closes; this waits for that, then insists).</summary>
@@ -169,6 +182,7 @@ public sealed partial class ServerSupervisor : ObservableObject, IDisposable
     {
         Stop();
         _crashes = 0;
+        _portRetried = false;
         Start();
     }
 
@@ -184,11 +198,21 @@ public sealed partial class ServerSupervisor : ObservableObject, IDisposable
         Problem = code switch
         {
             ExitBadArguments => "The server settings are invalid: " + (detail.Length > 0 ? detail : "check Settings."),
-            ExitViGEm => detail.Length > 0 ? detail : "The ViGEmBus driver is missing or not working. Install it from the Setup checklist.",
-            ExitNetwork => detail.Length > 0 ? detail : "The UDP port is not available. Choose another port in Settings.",
+            // The server's own text explains its command-line options (--dry-run, --port, --bind): keep only its first
+            // sentence and say what to do in this app.
+            ExitViGEm => "The ViGEmBus driver is missing or not working. Install it from the Setup checklist.",
+            ExitNetwork => $"{FirstSentence(detail) ?? "The UDP port is not available."} Check the port and the listen address in Settings (the phone needs the same port).",
             0 => "The server stopped.",
             _ => $"The server stopped unexpectedly (exit code {code}). {detail}".Trim(),
         };
+        // A busy port right after the start is retried once: the app's first system check probes the same port while the
+        // server starts. A second failure is a real conflict.
+        if (!_disposed && code == ExitNetwork && !_portRetried)
+        {
+            _portRetried = true;
+            ScheduleRestart(TimeSpan.FromSeconds(1));
+            return;
+        }
         // Settings, driver and port problems need the user; a crash gets a few automatic retries.
         if (_disposed || code is ExitBadArguments or ExitViGEm or ExitNetwork or 0) return;
         if (code == ExitFailure || code < 0 || code > ExitNetwork)
@@ -196,18 +220,43 @@ public sealed partial class ServerSupervisor : ObservableObject, IDisposable
             if (_crashes >= RestartDelays.Length) return;
             var delay = RestartDelays[_crashes++];
             Problem += $" Restarting in {delay.TotalSeconds:F0} s…";
-            _restartTimer ??= new DispatcherTimer(DispatcherPriority.Normal, _dispatcher);
-            _restartTimer.Interval = delay;
-            _restartTimer.Tick -= OnRestartTick;
-            _restartTimer.Tick += OnRestartTick;
-            _restartTimer.Start();
+            ScheduleRestart(delay);
         }
+    }
+
+    private void ScheduleRestart(TimeSpan delay)
+    {
+        _restartTimer ??= new DispatcherTimer(DispatcherPriority.Normal, _dispatcher);
+        _restartTimer.Interval = delay;
+        _restartTimer.Tick -= OnRestartTick;
+        _restartTimer.Tick += OnRestartTick;
+        _restartTimer.Start();
     }
 
     private void OnRestartTick(object? sender, EventArgs e)
     {
         _restartTimer!.Stop();
         Start();
+    }
+
+    private static ServerSettings? ReadSettingsFile()
+    {
+        try
+        {
+            if (!File.Exists(ServerSettings.DefaultPath)) return null;
+            using var stream = File.OpenRead(ServerSettings.DefaultPath);
+            return ServerSettings.Read(stream);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return null; // the server reports a broken file itself
+        }
+    }
+
+    private static string? FirstSentence(string text)
+    {
+        int end = text.IndexOf(". ", StringComparison.Ordinal);
+        return text.Length == 0 ? null : end < 0 ? text : text[..(end + 1)];
     }
 
     /// <summary>The server's error output, without its "Error: " prefix (it explains the fix).</summary>

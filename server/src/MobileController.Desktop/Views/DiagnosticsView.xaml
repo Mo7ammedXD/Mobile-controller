@@ -61,9 +61,7 @@
                             <TextBlock Grid.Row="5" Text="Slowest loop pass" />
                             <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Snapshot.Loop.MaxPassMs, StringFormat={}{0:F2} ms, FallbackValue=—}" FontWeight="SemiBold" />
                             <TextBlock Grid.Row="6" Text="Garbage collections (pause total)" />
-                            <TextBlock Grid.Row="6" Grid.Column="1" FontWeight="SemiBold">
-                                <Run Text="{Binding Snapshot.Gc.Gen0, Mode=OneWay, FallbackValue=—}" /><Run Text=" / " /><Run Text="{Binding Snapshot.Gc.Gen1, Mode=OneWay}" /><Run Text=" / " /><Run Text="{Binding Snapshot.Gc.Gen2, Mode=OneWay}" /><Run Text=" (" /><Run Text="{Binding Snapshot.Gc.PauseMs, Mode=OneWay, StringFormat=F1}" /><Run Text=" ms)" />
-                            </TextBlock>
+                            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding GcText}" FontWeight="SemiBold" />
                         </Grid>
                         <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
                                    Text="The receive loop allocates no memory while phones play, so garbage collections stay rare and short." />
@@ -84,7 +82,7 @@
                             <Run Text="Network: " /><Run Text="{Binding Network.Detail, Mode=OneWay}" />
                         </TextBlock>
                         <TextBlock Style="{StaticResource Caption}" FontSize="13" TextWrapping="Wrap" Margin="0,4,0,0">
-                            <Run Text="Power: " /><Run Text="{Binding Report.Power.Ok, Mode=OneWay, FallbackValue=unknown, StringFormat=can run at full speed in the background: {0}}" />
+                            <Run Text="Power: " /><Run Text="{Binding PowerText, Mode=OneWay}" />
                         </TextBlock>
                         <TextBlock Style="{StaticResource Caption}" FontSize="13" TextWrapping="Wrap" Margin="0,4,0,0">
                             <Run Text="System: " /><Run Text="{Binding Report.Os, Mode=OneWay, FallbackValue=—}" /><Run Text=" " /><Run Text="{Binding Report.Architecture, Mode=OneWay}" />

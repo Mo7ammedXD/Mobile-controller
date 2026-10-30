@@ -252,7 +252,10 @@ class MainActivity : ComponentActivity(), GamepadView.Listener, UdpLink.GameList
      * Values are persisted like settings typed by the user. Returns true when a host was given.
      */
     private fun applyExtras(intent: Intent?): Boolean {
-        val mode = intent?.getStringExtra(EXTRA_MODE)
+        // Only explicit launches (adb, test tools) may configure the app this way. A link from a web page or the camera
+        // arrives as a browsable VIEW, can carry extras too, and must go through handleLink's question instead.
+        if (intent == null || intent.action == Intent.ACTION_VIEW || intent.hasCategory(Intent.CATEGORY_BROWSABLE)) return false
+        val mode = intent.getStringExtra(EXTRA_MODE)
         if (mode != null && GameModes.ALL.any { it.id == mode }) {
             settings.modeId = mode
             settings.save()
@@ -520,6 +523,7 @@ class MainActivity : ComponentActivity(), GamepadView.Listener, UdpLink.GameList
         val menuOpen = view.editing || settingsOpen
         // The PC shows "in settings" instead of wondering why this controller went neutral.
         link.setStatusFlag(Protocol.STATUS_MENU_OPEN, menuOpen)
+        motion.suppressed = menuOpen
         val playing = settings.dimScreen && connected && resumed && !menuOpen
         if (playing) view.postDelayed(dim, DIM_DELAY_MS) else setBrightness(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
     }
@@ -533,6 +537,10 @@ class MainActivity : ComponentActivity(), GamepadView.Listener, UdpLink.GameList
     /** Receiver thread: the PC's user wants to know which phone this is (§13). */
     override fun onIdentify(durationMs: Int) {
         view.post {
+            // Full brightness for the flash (a playing phone is dimmed); the usual dimming resumes afterwards.
+            view.removeCallbacks(dim)
+            setBrightness(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
+            view.postDelayed({ updateDim() }, durationMs.toLong())
             view.identify(durationMs)
             link.rumble.haptics.play(Haptics.EVENT_IDENTIFY)
         }
@@ -554,9 +562,9 @@ class MainActivity : ComponentActivity(), GamepadView.Listener, UdpLink.GameList
 
     private fun onDetectedMode() {
         val mode = detectedMode ?: return
-        if (!settings.autoMode || mode === view.layout.mode) return
-        if (!resumed || view.editing || settingsOpen) {
-            // Not now: the PC repeats GAME every 2 s, so let the next one try again.
+        if (mode === view.layout.mode) return
+        if (!settings.autoMode || !resumed || view.editing || settingsOpen) {
+            // Not now: the PC repeats GAME every 2 s, so let the next one try again (also once auto mode is turned on).
             link.forgetDetectedGame()
             return
         }

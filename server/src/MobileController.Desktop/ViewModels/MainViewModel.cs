@@ -67,7 +67,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         ClearLogCommand = new RelayCommand(() => Logs.Clear());
         CopyTextCommand = new RelayCommand(p => CopyText(p as string));
         ExportDiagnosticsCommand = new RelayCommand(() => _ = ExportDiagnosticsAsync(), () => !_checking);
-        TestPatternCommand = new RelayCommand(p => RunTestPattern(p as string));
+        TestPatternCommand = new RelayCommand(p => _ = RunTestPatternAsync(p as string));
         DismissSetupCommand = new RelayCommand(DismissSetup);
 
         _client.Hello += OnHello;
@@ -114,8 +114,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public event Action<string, string>? Notify;
 
     public HelloMessage? Hello { get => _hello; private set => Set(ref _hello, value); }
-    public SnapshotMessage? Snapshot { get => _snapshot; private set => Set(ref _snapshot, value); }
-    public DiagnosticsReport? Report { get => _report; private set => Set(ref _report, value); }
+    public SnapshotMessage? Snapshot
+    {
+        get => _snapshot;
+        private set
+        {
+            if (Set(ref _snapshot, value)) OnPropertyChanged(nameof(GcText));
+        }
+    }
+
+    public DiagnosticsReport? Report
+    {
+        get => _report;
+        private set
+        {
+            if (Set(ref _report, value)) OnPropertyChanged(nameof(PowerText));
+        }
+    }
+
+    public string GcText => Snapshot?.Gc is { } gc ? $"{gc.Gen0} / {gc.Gen1} / {gc.Gen2} ({gc.PauseMs:F1} ms)" : "—";
+
+    public string PowerText => Report?.Power is not { } power
+        ? "not checked yet"
+        : power.Ok ? "the server can run at full speed in the background." : power.Problem ?? "Windows may slow the server down in the background.";
 
     public Level Health { get => _health; private set => Set(ref _health, value); }
     public string HealthTitle { get => _healthTitle; private set => Set(ref _healthTitle, value); }
@@ -126,13 +147,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     /// <summary>A short message about the last thing the user did (a command failed, a file was saved...).</summary>
     public string? StatusMessage { get => _statusMessage; set => Set(ref _statusMessage, value); }
 
-    public bool ShowSetup => !Desktop.SetupDone || Checklist.Any(c => c.Level is Level.Error or Level.Warning);
+    // Hide keeps it hidden through warnings (the firewall one is normal: Windows usually asks once); only an error, which
+    // stops phones from playing, brings it back.
+    public bool ShowSetup => !Desktop.SetupDone || Checklist.Any(c => c.Level is Level.Error);
 
     /// <summary>The address and pairing link the Connect page shows big (USB tethering first, then Wi-Fi / Ethernet).</summary>
     public AdapterItem? Pairing { get => _pairing; private set => Set(ref _pairing, value); }
 
     public string ServerName => Hello?.ServerName ?? Environment.MachineName;
-    public int Port => Hello?.Port ?? 24680;
+    // While the server is down, the port it will use: the settings file's.
+    public int Port => Hello?.Port ?? Settings.SettingsFile.Port ?? 24680;
     public string UptimeText => Snapshot is { } s ? PadViewModel.FormatDuration(s.Uptime) : "—";
     public string DefaultOutputText => Hello?.DefaultOutput == ControlProtocol.KindDualShock4 ? "DualShock 4" : "Xbox 360";
     public string ServerVersionText => Hello is { } h ? $"Server {h.ServerVersion} · protocol v{h.ProtocolVersion} · control v{h.ControlVersion}" : "";
@@ -250,7 +274,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void OnDisconnected()
     {
         Hello = null;
+        Snapshot = null;
         Pads.Clear();
+        // Everything OnHello filled in from the old server.
+        RefreshAdapters();
+        OnPropertyChanged(nameof(ServerName));
+        OnPropertyChanged(nameof(Port));
+        OnPropertyChanged(nameof(DefaultOutputText));
+        OnPropertyChanged(nameof(ServerVersionText));
         UpdateHealth();
     }
 
@@ -289,19 +320,25 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     /// <summary>"xbox360", "ds4" or "" (the phone's own choice): remembered for this phone and applied at once.</summary>
     public void SetOutput(PadViewModel pad, string kind)
     {
-        if (pad.Info.DeviceId is { } id) Settings.SetDevice(id, output: kind);
+        bool remembered = pad.Info.DeviceId is not { } id || Settings.SetDevice(id, output: kind);
         Send(ControlProtocol.OpOutput, pad.Index, kind, r =>
         {
-            if (r.Ok) StatusMessage = kind.Length == 0
+            if (!r.Ok) return;
+            StatusMessage = (kind.Length == 0
                 ? $"{pad.Title} now chooses its own controller type."
-                : $"{pad.Title} is now a{(kind == ControlProtocol.KindDualShock4 ? " DualShock 4" : "n Xbox 360 controller")}. Games see it unplugged and plugged in again.";
+                : $"{pad.Title} is now a{(kind == ControlProtocol.KindDualShock4 ? " DualShock 4" : "n Xbox 360 controller")}. Games see it unplugged and plugged in again.") +
+                (remembered ? "" : $" This is not remembered for next time: {Settings.Error}");
         });
     }
 
     public void RenamePad(PadViewModel pad, string? alias)
     {
         if (pad.Info.DeviceId is not { } id) return;
-        Settings.SetDevice(id, alias: alias ?? "");
+        if (!Settings.SetDevice(id, alias: alias ?? ""))
+        {
+            StatusMessage = $"The name was not saved: {Settings.Error}";
+            return;
+        }
         pad.Alias = string.IsNullOrWhiteSpace(alias) ? null : alias.Trim();
     }
 
@@ -317,9 +354,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         try
         {
             var reportTask = SystemChecks.DiagnoseAsync(Server.ServerPath);
-            var firewallTask = SystemChecks.FirewallRuleExistsAsync();
+            var firewallTask = SystemChecks.CheckFirewallRuleAsync(Port, Server.ServerPath);
             Report = await reportTask;
-            bool? firewall = await firewallTask;
+            var firewall = await firewallTask;
 
             if (Report is null)
                 Driver.Show(Level.Warning, "Could not ask the server to check the driver.", "Check again", RunChecksCommand);
@@ -328,11 +365,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             else
                 Driver.Show(Level.Error, Report.Driver.Problem ?? "Not installed.", "Download ViGEmBus", InstallDriverCommand);
 
-            if (firewall == true)
+            if (firewall == SystemChecks.FirewallRule.Covers)
                 Firewall.Show(Level.Good, "Phones on your network are allowed to connect.");
-            else if (firewall == false)
+            else if (firewall == SystemChecks.FirewallRule.Missing)
                 Firewall.Show(Level.Warning, "No rule for Mobile Controller yet: Windows may block phones (it usually asks once).",
                     "Allow phones (administrator)", FixFirewallCommand);
+            else if (firewall == SystemChecks.FirewallRule.Outdated)
+                Firewall.Show(Level.Warning, $"The firewall rule is for another port or another copy of this app, so Windows may block phones on port {Port}.",
+                    "Update the rule (administrator)", FixFirewallCommand);
             else
                 Firewall.Show(Level.Info, "Could not read the firewall rules.", "Check again", RunChecksCommand);
         }
@@ -366,7 +406,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         Adapters.Clear();
         string name = Uri.EscapeDataString(ServerName);
+        // A server bound to one address (Settings, Listen address) answers on that one only.
+        string? bind = Hello?.Bind is { } b && b != "0.0.0.0" ? b : null;
         foreach (var a in NetworkHints.LocalIPv4Addresses()
+                     .Where(a => bind is null || a.Address.ToString() == bind)
                      .OrderBy(a => a.Kind switch { AdapterKind.UsbTethering => 0, AdapterKind.Lan => 1, _ => 2 }))
         {
             Adapters.Add(new AdapterItem(a.Address.ToString(), a.Name, a.Description, a.Kind,
@@ -413,12 +456,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return;
         OnPropertyChanged(nameof(UptimeText));
-        if (Server.State == ServerState.Exited)
+        // Without the driver the server exits at once, so this comes before "not running" (whose Start again would only
+        // fail again); once a check finds the driver, Start again is the way back.
+        if (Driver.Level == Level.Error || (Server.DriverMissing && Driver.Level != Level.Good))
+            ShowHealth(Level.Error, "The controller driver is missing", "Games cannot see the phones until ViGEmBus is installed.", "Download ViGEmBus", InstallDriverCommand);
+        else if (Server.State == ServerState.Exited)
             ShowHealth(Level.Error, "The server is not running", Server.Problem ?? "", "Start again", RestartServerCommand);
         else if (Server.State == ServerState.Starting || Hello is null)
             ShowHealth(Level.Busy, "Starting the server…", "This takes a moment.");
-        else if (Driver.Level == Level.Error)
-            ShowHealth(Level.Error, "The controller driver is missing", "Games cannot see the phones until ViGEmBus is installed.", "Download ViGEmBus", InstallDriverCommand);
         else if (Network.Level == Level.Error)
             ShowHealth(Level.Error, "No network for phones", Network.Detail);
         else if (Pads.Count == 0)
@@ -475,23 +520,46 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Plugs one extra controller for 10 s and animates it (no phone needed), to check the driver in a game or tester.</summary>
-    private void RunTestPattern(string? kind)
+    private async Task RunTestPatternAsync(string? kind)
     {
-        if (!File.Exists(Server.ServerPath)) return;
+        if (!File.Exists(Server.ServerPath))
+        {
+            StatusMessage = $"The test pattern needs MobileController.Server.exe next to this app ({Server.ServerPath}).";
+            return;
+        }
         var info = new ProcessStartInfo(Server.ServerPath) { UseShellExecute = false, CreateNoWindow = true };
         info.ArgumentList.Add("--test-pattern");
         info.ArgumentList.Add("10");
         info.ArgumentList.Add("--default-output");
         info.ArgumentList.Add(kind == ControlProtocol.KindDualShock4 ? kind : ControlProtocol.KindXbox360);
         info.ArgumentList.Add("--no-config");
+        Process? process;
         try
         {
-            Process.Start(info)?.Dispose();
-            StatusMessage = "A test controller is plugged in for 10 seconds: its sticks circle and its buttons cycle. Watch it in a game or in joy.cpl.";
+            process = Process.Start(info);
         }
         catch (Win32Exception e)
         {
             StatusMessage = $"The test pattern could not start: {e.Message}";
+            return;
+        }
+        if (process is null) return;
+        using (process)
+        {
+            StatusMessage = "A test controller is plugged in for 10 seconds: its sticks circle and its buttons cycle. Watch it in a game or in joy.cpl.";
+            // Plugging in takes milliseconds; a server that is gone after 2 s could not do it.
+            using var quick = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            try
+            {
+                await process.WaitForExitAsync(quick.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            StatusMessage = process.ExitCode == ServerSupervisor.ExitViGEm
+                ? "The test controller needs the ViGEmBus driver: install it from the Setup checklist."
+                : $"The test pattern stopped at once (exit code {process.ExitCode}).";
         }
     }
 

@@ -15,7 +15,6 @@ internal sealed class PadSlot
 
     private bool _hasAccepted;
     private bool _dirty;
-    private bool _hasSubmitted;
     private PadState _pending;
     private PadState _submitted;
 
@@ -217,10 +216,7 @@ internal sealed class PadSlot
         state = _pending;
         if (!_dirty) return false;
         _dirty = false;
-        // The first state always goes out, even an all-zero one: until a fresh ViGEm Xbox 360 pad gets its first report,
-        // XInput reads its sticks slightly off centre.
-        if (_hasSubmitted && state == _submitted) return false;
-        _hasSubmitted = true;
+        if (state == _submitted) return false;
         _submitted = state;
         return true;
     }

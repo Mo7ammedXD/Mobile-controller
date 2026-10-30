@@ -41,12 +41,13 @@ public static class SystemChecks
     }
 
     /// <summary>
-    /// True if the firewall rule exists, false if not, null if that could not be determined. <c>netsh</c> answers without
-    /// administrator rights and much faster than PowerShell's firewall cmdlets.
+    /// Whether the firewall rule exists and lets this copy of the server receive on <paramref name="port"/>; null if that
+    /// could not be determined. <c>netsh</c> answers without administrator rights and much faster than PowerShell's
+    /// firewall cmdlets.
     /// </summary>
-    public static async Task<bool?> FirewallRuleExistsAsync(CancellationToken token = default)
+    public static async Task<FirewallRule?> CheckFirewallRuleAsync(int port, string serverPath, CancellationToken token = default)
     {
-        var info = new ProcessStartInfo("netsh", $"advfirewall firewall show rule name=\"{FirewallRuleName}\"")
+        var info = new ProcessStartInfo("netsh", $"advfirewall firewall show rule name=\"{FirewallRuleName}\" verbose")
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -58,12 +59,29 @@ public static class SystemChecks
             string output = await process.StandardOutput.ReadToEndAsync(token);
             await process.WaitForExitAsync(token);
             // netsh exits with 1 and "No rules match the specified criteria." when there is none.
-            return process.ExitCode == 0 && output.Contains(FirewallRuleName, StringComparison.OrdinalIgnoreCase);
+            if (process.ExitCode != 0 || !output.Contains(FirewallRuleName, StringComparison.OrdinalIgnoreCase)) return FirewallRule.Missing;
+            return RuleCovers(output, port, serverPath) ? FirewallRule.Covers : FirewallRule.Outdated;
         }
         catch (Exception e) when (e is Win32Exception or InvalidOperationException or IOException)
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Add-FirewallRule.ps1 makes one rule for one UDP port, optionally limited to one exe. The labels of netsh's output
+    /// are translated on other Windows languages, so only the values (after the first colon of each line) are compared.
+    /// </summary>
+    internal static bool RuleCovers(string netshOutput, int port, string serverPath)
+    {
+        var values = netshOutput.Split('\n')
+            .Select(line => line.IndexOf(':') is int colon and >= 0 ? line[(colon + 1)..].Trim() : "")
+            .Where(value => value.Length > 0)
+            .ToList();
+        bool portOk = values.Any(v => v.Split(',').Any(p => p.Trim() == port.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        var programs = values.Where(v => v.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)).ToList();
+        bool programOk = programs.Count == 0 || programs.Any(p => string.Equals(p, serverPath, StringComparison.OrdinalIgnoreCase));
+        return portOk && programOk;
     }
 
     /// <summary>
@@ -91,6 +109,14 @@ public static class SystemChecks
         {
             return false; // the user said no to the elevation prompt
         }
+    }
+
+    public enum FirewallRule
+    {
+        Missing,
+        /// <summary>The rule is for another port, or for a copy of the server in another folder.</summary>
+        Outdated,
+        Covers,
     }
 
     /// <summary>Opens a web page or a folder in the user's default handler.</summary>

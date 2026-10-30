@@ -11,8 +11,10 @@
             <Border Style="{StaticResource Card}" Visibility="{Binding ShowSetup, Converter={StaticResource BoolToVisibility}}">
                 <StackPanel>
                     <DockPanel LastChildFill="True">
-                        <Button DockPanel.Dock="Right" Content="Hide" Command="{Binding DismissSetupCommand}" Padding="12,4" />
-                        <Button DockPanel.Dock="Right" Content="Check again" Command="{Binding RunChecksCommand}" Padding="12,4" Margin="0,0,8,0" />
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Content="Check again" Command="{Binding RunChecksCommand}" Padding="12,4" Margin="0,0,8,0" />
+                            <Button Content="Hide" Command="{Binding DismissSetupCommand}" Padding="12,4" />
+                        </StackPanel>
                         <TextBlock Text="Setup checklist" Style="{StaticResource SectionTitle}" VerticalAlignment="Center" Margin="0" />
                     </DockPanel>
                     <ItemsControl ItemsSource="{Binding Checklist}" Margin="0,4,0,0">

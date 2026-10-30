@@ -131,7 +131,8 @@ class Haptics(context: Context) {
         val effect = effects[event] ?: return
         synchronized(this) {
             if (rumbleEffect != null) {
-                if (!playDuringRumble) return
+                // Identify is the PC asking which phone this is: it must be felt even mid-rumble.
+                if (!playDuringRumble && event != EVENT_IDENTIFY) return
                 rumbleSuspended = true
                 handler.removeCallbacks(resumeRumble)
                 handler.postDelayed(resumeRumble, durations[event])

@@ -81,6 +81,9 @@ internal sealed class ViGEmXbox360Pad : IVirtualPad
 {
     private readonly IXbox360Controller _pad;
     private readonly PadFeedbackHandler _onFeedback;
+    // The wrapper's report is written by Submit (receive thread) and Prime (also a pool thread, once).
+    private readonly Lock _report = new();
+    private int _attached;
 
     public ViGEmXbox360Pad(IXbox360Controller pad, PadFeedbackHandler onFeedback)
     {
@@ -91,6 +94,7 @@ internal sealed class ViGEmXbox360Pad : IVirtualPad
         // Subscribe before Connect: the driver reports the player LED right after plug-in.
         pad.FeedbackReceived += OnFeedbackReceived;
         ViGEmPadFactory.Connect(pad, () => pad.FeedbackReceived -= OnFeedbackReceived);
+        Prime();
     }
 
     public PadKind Kind => PadKind.Xbox360;
@@ -98,15 +102,37 @@ internal sealed class ViGEmXbox360Pad : IVirtualPad
     public void Submit(in PadState state)
     {
         // Writes go straight into the wrapper's XUSB_REPORT through ref-returning properties; SubmitReport passes that
-        // blittable struct by value to vigem_target_x360_update. No managed allocation on this path.
-        _pad.SetButtonsFull(state.Buttons);
-        _pad.LeftTrigger = state.LeftTrigger;
-        _pad.RightTrigger = state.RightTrigger;
-        _pad.LeftThumbX = state.ThumbLX;
-        _pad.LeftThumbY = state.ThumbLY;
-        _pad.RightThumbX = state.ThumbRX;
-        _pad.RightThumbY = state.ThumbRY;
-        _pad.SubmitReport();
+        // blittable struct by value to vigem_target_x360_update. No managed allocation on this path (an uncontended
+        // Lock does not allocate either).
+        lock (_report)
+        {
+            _pad.SetButtonsFull(state.Buttons);
+            _pad.LeftTrigger = state.LeftTrigger;
+            _pad.RightTrigger = state.RightTrigger;
+            _pad.LeftThumbX = state.ThumbLX;
+            _pad.LeftThumbY = state.ThumbLY;
+            _pad.RightThumbX = state.ThumbRX;
+            _pad.RightThumbY = state.ThumbRY;
+            _pad.SubmitReport();
+        }
+    }
+
+    /// <summary>
+    /// Until a fresh pad gets a report, XInput reads three of its stick axes off centre (about -3300), and a report equal
+    /// to the previous one (all zero at first) does not clear that: a different one does. So the current report goes out
+    /// again after a one-off nudge, at plug-in and once more when Windows assigns the player, because a nudge sent while
+    /// the device is still starting can be lost. Without this, a phone whose first state is neutral would drift.
+    /// </summary>
+    private void Prime()
+    {
+        lock (_report)
+        {
+            short x = _pad.LeftThumbX;
+            _pad.LeftThumbX = (short)(x ^ 1);
+            _pad.SubmitReport();
+            _pad.LeftThumbX = x;
+            _pad.SubmitReport();
+        }
     }
 
     public void Dispose()
@@ -121,11 +147,26 @@ internal sealed class ViGEmXbox360Pad : IVirtualPad
         // would tear down the process.
         try
         {
+            // Not from this thread: the driver is still waiting for the callback to return.
+            if (e.LedNumber <= 3 && Interlocked.Exchange(ref _attached, 1) == 0)
+                ThreadPool.UnsafeQueueUserWorkItem(static pad => pad.PrimeAttached(), this, preferLocal: false);
             _onFeedback(e.LargeMotor, e.SmallMotor, e.LedNumber);
         }
         catch (Exception)
         {
             // Feedback is best effort; the 100 ms heartbeat resends the current state anyway.
+        }
+    }
+
+    private void PrimeAttached()
+    {
+        try
+        {
+            Prime();
+        }
+        catch (Exception)
+        {
+            // Unplugged in the meantime.
         }
     }
 }
