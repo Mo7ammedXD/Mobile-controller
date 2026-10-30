@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-label="How Mobile Controller works: the phone sends its controller state over UDP to the server on the PC, which plays it into a virtual controller through ViGEmBus; the desktop app watches and configures the server">
+<title>How Mobile Controller works: the phone sends its controller state over UDP to the server on the PC, which plays it into a virtual controller through ViGEmBus; the desktop app watches and configures the server</title>
+<defs>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4FA3FF"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#FFB86B"/></marker>
+<marker id="grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8B98A8"/></marker>
+<marker id="green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6FD08C"/></marker>
+</defs>
+<rect x="1" y="1" width="1198" height="598" rx="16" fill="#0D1117" stroke="#30363D" stroke-width="2"/>
+<text x="40" y="72" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="bold" fill="#8B98A8" text-anchor="start" xml:space="preserve" letter-spacing="1.5">ANDROID PHONE</text>
+<rect x="40" y="90" width="310" height="170" rx="26" fill="#05070A" stroke="#3B4757" stroke-width="2"/>
+<rect x="56" y="104" width="278" height="142" rx="12" fill="#0D1117" stroke="none" stroke-width="1"/>
+<circle cx="110" cy="190" r="34" fill="#1C232D" stroke="#3B4757" stroke-width="2"/>
+<circle cx="119" cy="181" r="14" fill="#4A5868" stroke="none" stroke-width="1"/>
+<circle cx="222" cy="205" r="24" fill="#1C232D" stroke="#3B4757" stroke-width="2"/>
+<circle cx="222" cy="205" r="9" fill="#4A5868" stroke="none" stroke-width="1"/>
+<circle cx="295" cy="150" r="11" fill="#F5C518" stroke="#F5C518" stroke-width="2" fill-opacity="0.22"/>
+<text x="295" y="154" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="bold" fill="#F5C518" text-anchor="middle" xml:space="preserve">Y</text>
+<circle cx="271" cy="174" r="11" fill="#2D8CFF" stroke="#2D8CFF" stroke-width="2" fill-opacity="0.22"/>
+<text x="271" y="178" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="bold" fill="#2D8CFF" text-anchor="middle" xml:space="preserve">X</text>
+<circle cx="319" cy="174" r="11" fill="#E5383B" stroke="#E5383B" stroke-width="2" fill-opacity="0.22"/>
+<text x="319" y="178" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="bold" fill="#E5383B" text-anchor="middle" xml:space="preserve">B</text>
+<circle cx="295" cy="198" r="11" fill="#5BC236" stroke="#5BC236" stroke-width="2" fill-opacity="0.22"/>
+<text x="295" y="202" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="bold" fill="#5BC236" text-anchor="middle" xml:space="preserve">A</text>
+<circle cx="195" cy="120" r="8" fill="#1C232D" stroke="none" stroke-width="1"/>
+<text x="195" y="124" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="normal" fill="#B8C4D0" text-anchor="middle" xml:space="preserve">⚙</text>
+<rect x="84" y="110" width="50" height="9" rx="4" fill="#E5383B" stroke="#E5383B" stroke-width="1.5" fill-opacity="0.22"/>
+<circle cx="46" cy="300" r="3" fill="#4FA3FF" stroke="none" stroke-width="1"/>
+<text x="58" y="304" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">Touch layouts for each kind of game</text>
+<circle cx="46" cy="322" r="3" fill="#4FA3FF" stroke="none" stroke-width="1"/>
+<text x="58" y="326" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">Gyro aiming and tilt steering</text>
+<circle cx="46" cy="344" r="3" fill="#4FA3FF" stroke="none" stroke-width="1"/>
+<text x="58" y="348" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">Sends the whole controller state on</text>
+<text x="58" y="370" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">every change, and at least 120 times</text>
+<text x="58" y="392" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">a second</text>
+<circle cx="46" cy="410" r="3" fill="#4FA3FF" stroke="none" stroke-width="1"/>
+<text x="58" y="414" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">Vibrates for buttons and game rumble</text>
+<text x="473" y="96" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="bold" fill="#DCE6F0" text-anchor="middle" xml:space="preserve">UDP, port 24680</text>
+<text x="473" y="114" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">over Wi-Fi or USB tethering</text>
+<line x1="362" y1="152" x2="584" y2="152" stroke="#4FA3FF" stroke-width="2" marker-end="url(#blue)"/>
+<text x="473" y="144" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="bold" fill="#4FA3FF" text-anchor="middle" xml:space="preserve">INPUT</text>
+<text x="473" y="169" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">the full state, 16 bytes</text>
+<line x1="362" y1="207" x2="584" y2="207" stroke="#4FA3FF" stroke-width="2" marker-end="url(#blue)"/>
+<text x="473" y="199" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="bold" fill="#4FA3FF" text-anchor="middle" xml:space="preserve">STATUS</text>
+<text x="473" y="224" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">name, battery, latency</text>
+<line x1="584" y1="262" x2="362" y2="262" stroke="#FFB86B" stroke-width="2" marker-end="url(#orange)"/>
+<text x="473" y="254" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="bold" fill="#FFB86B" text-anchor="middle" xml:space="preserve">FEEDBACK</text>
+<text x="473" y="279" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">player number, rumble</text>
+<line x1="584" y1="317" x2="362" y2="317" stroke="#FFB86B" stroke-width="2" marker-end="url(#orange)"/>
+<text x="473" y="309" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="bold" fill="#FFB86B" text-anchor="middle" xml:space="preserve">COMMAND</text>
+<text x="473" y="334" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">identify this phone</text>
+<line x1="364" y1="382" x2="582" y2="382" stroke="#8B98A8" stroke-width="1.5" stroke-dasharray="5 5" marker-start="url(#grey)" marker-end="url(#grey)"/>
+<text x="473" y="374" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="bold" fill="#B8C4D0" text-anchor="middle" xml:space="preserve">FIND PC</text>
+<text x="473" y="399" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">broadcast; the PC answers</text>
+<rect x="590" y="56" width="580" height="516" rx="16" fill="#161B22" stroke="#30363D" stroke-width="1.5"/>
+<text x="610" y="84" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="bold" fill="#8B98A8" text-anchor="start" xml:space="preserve" letter-spacing="1.5">WINDOWS PC</text>
+<rect x="610" y="104" width="280" height="176" rx="12" fill="#1A2433" stroke="#4FA3FF" stroke-width="1.5"/>
+<text x="630" y="134" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="bold" fill="#DCE6F0" text-anchor="start" xml:space="preserve">Server</text>
+<text x="630" y="154" font-family="Consolas, 'SF Mono', Menlo, monospace" font-size="12" font-weight="normal" fill="#8B98A8" text-anchor="start" xml:space="preserve">MobileController.Server</text>
+<text x="630" y="182" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">One virtual pad per phone, up to 4</text>
+<text x="630" y="204" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">Neutral if a phone goes quiet</text>
+<text x="630" y="226" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">Sends rumble back to the phone</text>
+<text x="630" y="248" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">Answers Find PC</text>
+<rect x="610" y="362" width="280" height="176" rx="12" fill="#172A20" stroke="#6FD08C" stroke-width="1.5"/>
+<text x="630" y="392" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="bold" fill="#DCE6F0" text-anchor="start" xml:space="preserve">Desktop app</text>
+<text x="630" y="412" font-family="Consolas, 'SF Mono', Menlo, monospace" font-size="12" font-weight="normal" fill="#8B98A8" text-anchor="start" xml:space="preserve">MobileController.Desktop</text>
+<text x="630" y="440" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">Starts and watches the server</text>
+<text x="630" y="462" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">Every phone's status, live</text>
+<text x="630" y="484" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">Diagnostics, log and settings</text>
+<text x="630" y="506" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="normal" fill="#B8C4D0" text-anchor="start" xml:space="preserve">QR code for connecting</text>
+<line x1="666" y1="358" x2="666" y2="286" stroke="#6FD08C" stroke-width="2" marker-end="url(#green)"/>
+<line x1="834" y1="286" x2="834" y2="358" stroke="#6FD08C" stroke-width="2" marker-end="url(#green)"/>
+<text x="750" y="312" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="bold" fill="#DCE6F0" text-anchor="middle" xml:space="preserve">named pipes</text>
+<text x="676" y="336" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#8B98A8" text-anchor="start" xml:space="preserve">status, log</text>
+<text x="824" y="336" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#8B98A8" text-anchor="end" xml:space="preserve">commands</text>
+<rect x="920" y="104" width="230" height="72" rx="12" fill="#1C232D" stroke="#3B4757" stroke-width="1.5"/>
+<text x="1035" y="136.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="bold" fill="#DCE6F0" text-anchor="middle" xml:space="preserve">ViGEmBus driver</text>
+<text x="1035" y="156.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">a virtual controller bus</text>
+<rect x="920" y="214" width="230" height="72" rx="12" fill="#1C232D" stroke="#3B4757" stroke-width="1.5"/>
+<text x="1035" y="246.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="bold" fill="#DCE6F0" text-anchor="middle" xml:space="preserve">Xbox 360 or DualShock 4</text>
+<text x="1035" y="266.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">a real controller to Windows</text>
+<rect x="920" y="324" width="230" height="72" rx="12" fill="#1C232D" stroke="#3B4757" stroke-width="1.5"/>
+<text x="1035" y="356.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="bold" fill="#DCE6F0" text-anchor="middle" xml:space="preserve">Your game</text>
+<text x="1035" y="376.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">XInput, DirectInput, Steam Input</text>
+<rect x="920" y="446" width="230" height="92" rx="12" fill="#1C232D" stroke="#3B4757" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="1035" y="478" font-family="Consolas, 'SF Mono', Menlo, monospace" font-size="15" font-weight="bold" fill="#DCE6F0" text-anchor="middle" xml:space="preserve">server.json</text>
+<text x="1035" y="500" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">settings: the desktop app</text>
+<text x="1035" y="518" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="normal" fill="#8B98A8" text-anchor="middle" xml:space="preserve">writes them, the server reads them</text>
+<line x1="890" y1="140" x2="916" y2="140" stroke="#8B98A8" stroke-width="2" marker-end="url(#grey)"/>
+<line x1="1035" y1="176" x2="1035" y2="210" stroke="#8B98A8" stroke-width="2" marker-end="url(#grey)"/>
+<line x1="1035" y1="286" x2="1035" y2="320" stroke="#8B98A8" stroke-width="2" marker-end="url(#grey)"/>
+<line x1="890" y1="492" x2="916" y2="492" stroke="#8B98A8" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#grey)"/>
+</svg>

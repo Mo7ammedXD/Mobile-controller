@@ -32,6 +32,10 @@ private val Colors = darkColorScheme(
     primary = Color(0xFF4FA3FF),
     onPrimary = Color(0xFF00182E),
     secondary = Color(0xFF6FD08C),
+    // Selected section, chips and slider tracks: without these, Material's default purple shows through.
+    secondaryContainer = Color(0xFF1F3B5C),
+    onSecondaryContainer = Color(0xFFD6E8FF),
+    surfaceContainerHighest = Color(0xFF242C38),
     background = Color(0xFF0D1117),
     onBackground = Color(0xFFDCE6F0),
     surface = Color(0xFF0D1117),

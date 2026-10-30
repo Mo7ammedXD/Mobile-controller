@@ -134,6 +134,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string ServerName => Hello?.ServerName ?? Environment.MachineName;
     public int Port => Hello?.Port ?? 24680;
     public string UptimeText => Snapshot is { } s ? PadViewModel.FormatDuration(s.Uptime) : "—";
+    public string DefaultOutputText => Hello?.DefaultOutput == ControlProtocol.KindDualShock4 ? "DualShock 4" : "Xbox 360";
     public string ServerVersionText => Hello is { } h ? $"Server {h.ServerVersion} · protocol v{h.ProtocolVersion} · control v{h.ControlVersion}" : "";
 
     public IReadOnlyList<string> LogLevels { get; } = ["All", "Warnings and errors", "Errors"];
@@ -198,6 +199,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RefreshAdapters();
         OnPropertyChanged(nameof(ServerName));
         OnPropertyChanged(nameof(Port));
+        OnPropertyChanged(nameof(DefaultOutputText));
         OnPropertyChanged(nameof(ServerVersionText));
         UpdateHealth();
     }

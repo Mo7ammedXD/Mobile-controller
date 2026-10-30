@@ -62,7 +62,7 @@
                             <Run Text="{Binding Pads.Count, Mode=OneWay}" /><Run Text=" of " /><Run Text="{Binding Hello.MaxPads, Mode=OneWay, FallbackValue=4}" />
                         </TextBlock>
                         <TextBlock Text="Default type" Style="{StaticResource MetricLabel}" Margin="0,10,0,2" />
-                        <TextBlock Text="{Binding Hello.DefaultOutput, FallbackValue=xbox360}" Style="{StaticResource MetricValue}" />
+                        <TextBlock Text="{Binding DefaultOutputText}" Style="{StaticResource MetricValue}" />
                         <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
                                    Text="XInput games see up to 4 controllers. Each phone can be an Xbox 360 controller or a DualShock 4." />
                     </StackPanel>

@@ -1,0 +1,61 @@
+# Pushing a version tag (git tag v1.2.0, then git push origin v1.2.0) builds the Windows app and the APK with
+# scripts/Build-Release.ps1 and publishes both as a GitHub release. README, "Making a release", covers the secrets.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: server/global.json
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Restore the signing key
+        shell: pwsh
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if (-not $env:KEYSTORE_BASE64 -or -not $env:KEYSTORE_PASSWORD) {
+            throw 'Add the ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD secrets first (README, "Making a release").'
+          }
+          [IO.File]::WriteAllBytes("$PWD\android\release.jks", [Convert]::FromBase64String($env:KEYSTORE_BASE64))
+          Set-Content android\keystore.properties -Value @(
+            'storeFile=release.jks'
+            "storePassword=$env:KEYSTORE_PASSWORD"
+            'keyAlias=mobilecontroller'
+            "keyPassword=$env:KEYSTORE_PASSWORD"
+          )
+
+      - name: Build
+        shell: pwsh
+        run: ./scripts/Build-Release.ps1 -Version ($env:GITHUB_REF_NAME.TrimStart('v'))
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @(
+            '**Phone (Android 8.0 or newer):** download `MobileController.apk` on the phone and open it. Allow installing apps from your browser if Android asks.'
+            ''
+            '**PC (Windows 10 or 11, 64-bit):** install the [ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases), then download `MobileController-Windows-x64.zip`, extract it and run `MobileController.exe`.'
+            ''
+            "Step by step: [Quick start](https://github.com/$env:GITHUB_REPOSITORY#quick-start)"
+          ) -join "`n"
+          gh release create $env:GITHUB_REF_NAME dist/MobileController-Windows-x64.zip dist/MobileController.apk `
+            --title "Mobile Controller $env:GITHUB_REF_NAME" --notes $notes
