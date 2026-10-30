@@ -44,6 +44,10 @@ class MotionInput(context: Context, private val link: UdpLink) : SensorEventList
     /** Gyro aiming filter and its settings (smoothing, calibration, axes). */
     val gyro = GyroFilter()
 
+    /** The gyro's latest filtered output (StickMath-packed), gate or not: the settings screen's live gauge. */
+    @Volatile var preview = 0
+        private set
+
     /** Display rotation (Surface.ROTATION_*): sensor axes are the device's, the player's are the screen's. */
     @Volatile var rotation = MotionMath.ROTATION_90
 
@@ -144,6 +148,7 @@ class MotionInput(context: Context, private val link: UdpLink) : SensorEventList
         gateWasOpen = open
         // Filtered even while closed, so calibration keeps learning (not aiming is the best time to).
         val packed = gyro.process(wx, wy, wz, gx, gy, gz, rotation, timestamp)
+        preview = packed
         if (mode != GameMode.MOTION_AIM) return
         val out = if (open) packed else 0
         if (link.state.setMotion(0, StickMath.unpackX(out), StickMath.unpackY(out))) link.wake()

@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The settings screen (ui/settings). -->
+<resources>
+    <string name="settings_title">Settings</string>
+    <string name="done">Done</string>
+    <string name="edit_layout">Edit layout</string>
+    <string name="test">Test</string>
+
+    <string name="section_connection">Connection</string>
+    <string name="section_mode">Game mode</string>
+    <string name="section_sticks">Sticks</string>
+    <string name="section_buttons">Buttons</string>
+    <string name="section_motion">Motion</string>
+    <string name="section_feedback">Feedback</string>
+    <string name="section_display">Display</string>
+    <string name="section_about">About</string>
+
+    <!-- Connection -->
+    <string name="connection_status">Status</string>
+    <string name="status_player">Player %1$d</string>
+    <string name="status_rtt">%1$d ms latency</string>
+    <string name="status_ds4">DualShock 4</string>
+    <string name="settings_pc">PC address</string>
+    <string name="hint_host">PC address, e.g. 192.168.1.20</string>
+    <string name="hint_port">Port</string>
+    <string name="error_host">Enter an IP address or host name</string>
+    <string name="error_port">Port must be 1–65535</string>
+    <string name="find_pc">Find PC</string>
+    <string name="discovery_searching">Searching the local network…</string>
+    <string name="discovery_none">No PC found. Is the Mobile Controller app running on the PC, and is the phone on the same Wi-Fi or USB tethering?</string>
+    <plurals name="discovery_found">
+        <item quantity="one">Found %d PC. Tap it to select it.</item>
+        <item quantity="other">Found %d PCs. Tap one to select it.</item>
+    </plurals>
+    <string name="discovery_row">%1$s  ·  %2$s:%3$d  ·  pads %4$d/%5$d</string>
+    <string name="settings_output">Controller on the PC</string>
+    <string name="output_auto">PC decides</string>
+    <string name="output_xbox">Xbox 360</string>
+    <string name="output_ds4">DualShock 4</string>
+    <string name="output_caption">Xbox works in every PC game with controller support. DualShock 4 shows PlayStation buttons in games that support it, but games that only know Xbox controllers don\'t see it.</string>
+    <string name="settings_rate">Send rate</string>
+    <string name="rate_caption">How often the phone updates the PC even when nothing changes. 120 Hz suits most games; lower saves a little battery.</string>
+    <string name="settings_auto_mode">Switch mode for the game on the PC</string>
+    <string name="auto_mode_caption">When the PC reports a game this app knows, its game mode is picked by itself.</string>
+
+    <!-- Game mode -->
+    <string name="mode_best_for">Best for: %1$s</string>
+    <string name="edit_layout_caption">Move and resize the controls of the selected mode.</string>
+    <string name="settings_floating">Buttons follow your thumb</string>
+    <string name="floating_caption">A cluster of buttons moves under the thumb that lands near it, so you find it without looking.</string>
+    <string name="settings_left_handed">Left-handed (mirror the layout)</string>
+
+    <!-- Sticks -->
+    <string name="stick_left">Left stick</string>
+    <string name="stick_right">Right stick</string>
+    <string name="deadzone">Deadzone</string>
+    <string name="deadzone_caption">Ignores the first part of the thumb\'s travel, so a resting thumb sends nothing.</string>
+    <string name="outer_deadzone">Full output before the edge</string>
+    <string name="outer_deadzone_caption">The last part of the travel already counts as fully pushed.</string>
+    <string name="deadzone_shape">Deadzone shape</string>
+    <string name="shape_round">Round</string>
+    <string name="shape_axial">Per axis</string>
+    <string name="shape_snap">Snap to axes</string>
+    <string name="shape_caption">Per axis and Snap make straight up, down, left and right easier (menus, 2D games); Round keeps every direction exact.</string>
+    <string name="anchor">Where the stick is</string>
+    <string name="anchor_floating">Under the thumb</string>
+    <string name="anchor_fixed">Fixed</string>
+    <string name="anchor_follow">Follows the thumb</string>
+    <string name="anchor_caption">Under the thumb: centred where the thumb lands. Fixed: like a real stick. Follows: also moves along when the thumb goes past the edge.</string>
+    <string name="invert_x">Invert left / right</string>
+    <string name="invert_y">Invert up / down</string>
+    <string name="feel_title">Feel in %1$s</string>
+    <string name="anti_deadzone">Anti-deadzone</string>
+    <string name="anti_deadzone_caption">Starts the output just past the game\'s own deadzone, so small movements count at once.</string>
+    <string name="sensitivity">Sensitivity</string>
+    <string name="sensitivity_caption">Above 100 %, full output comes before the edge of the circle (both sticks).</string>
+    <string name="aim_curve">Aim precision</string>
+    <string name="aim_curve_caption">Higher makes small right-stick movements finer, for aiming; 1.0 is linear.</string>
+    <string name="curve_title">Response</string>
+    <string name="curve_caption">Output (up) for the thumb\'s travel (across).</string>
+    <string name="test_pad">Try it</string>
+    <string name="test_pad_caption">Drag in the circle: these are the numbers the game receives.</string>
+
+    <!-- Buttons -->
+    <string name="min_press">Shortest press</string>
+    <string name="min_press_caption">A tap shorter than this is held this long, so the game sees every tap even if a packet is lost; a quick double tap stays two taps. 0 = off.</string>
+    <string name="dpad_title">D-pad</string>
+    <string name="dpad_deadzone">Centre deadzone</string>
+    <string name="dpad_diagonal">Diagonal width</string>
+    <string name="dpad_diagonal_caption">Wider makes diagonals easier, narrower makes straight directions safer. 22 ° is even.</string>
+    <string name="dpad_four_way">Four directions only</string>
+    <string name="dpad_four_way_caption">Never presses two directions at once (fighting games, menus, grids).</string>
+    <string name="edge_title">Sprint ring</string>
+    <string name="edge_on">Starts at</string>
+    <string name="edge_off">Stops below</string>
+    <string name="edge_caption">Pushing a stick past its ring holds its edge action (such as sprint). In percent of the stick\'s size.</string>
+    <string name="pedal_title">Pedals (racing)</string>
+    <string name="pedal_min">Lightest press</string>
+    <string name="pedal_gain">Rise</string>
+    <string name="pedal_curve">Curve</string>
+    <string name="pedal_caption">The bottom of a pedal presses this lightly; the output then rises with the thumb, faster with a higher Rise.</string>
+
+    <!-- Motion -->
+    <string name="settings_motion_aim">Gyro aiming (turn the phone to aim)</string>
+    <string name="settings_motion_steer">Tilt steering (turn the phone like a wheel)</string>
+    <string name="settings_motion_none">This game mode has no motion controls.</string>
+    <string name="settings_motion_unavailable">This phone has no sensor for it.</string>
+    <string name="settings_gyro_while_aiming">Only while aiming (LT held)</string>
+    <string name="motion_sensitivity">Sensitivity</string>
+    <string name="gyro_sens_x">Left / right</string>
+    <string name="gyro_sens_y">Up / down</string>
+    <string name="gyro_invert_x">Invert left / right</string>
+    <string name="gyro_invert_y">Invert up / down</string>
+    <string name="gyro_axis">Turning that aims sideways</string>
+    <string name="axis_player">Turn your body</string>
+    <string name="axis_local">Turn the phone</string>
+    <string name="axis_roll">Steering wheel</string>
+    <string name="gyro_smoothing">Smoothing</string>
+    <string name="gyro_smoothing_caption">Calms slow, fine aim; fast turns are never delayed. 0 = off.</string>
+    <string name="gyro_tightening">Tightening</string>
+    <string name="gyro_tightening_caption">Makes very slow movements smaller, so a resting hand holds the aim still. 0 = off.</string>
+    <string name="gyro_accel">Acceleration</string>
+    <string name="gyro_accel_caption">Fast turns go further than slow ones. 100 % = off.</string>
+    <string name="gyro_auto_calibrate">Correct drift by itself</string>
+    <string name="gyro_auto_calibrate_caption">Learns the sensor\'s resting offset whenever the phone is still.</string>
+    <string name="calibrate_caption">If the aim drifts while the phone lies still: lay it down, tap Calibrate and keep it still for 2 seconds.</string>
+    <string name="gyro_live">Live: what the gyro sends</string>
+
+    <!-- Feedback -->
+    <string name="settings_haptics">Haptic feedback</string>
+    <string name="haptics_caption">Works even when Android\'s touch feedback is off.</string>
+    <string name="strength">Strength</string>
+    <string name="haptic_press">Buttons</string>
+    <string name="haptic_rim">Stick at full output</string>
+    <string name="haptic_confirm">Sprint and toggles on</string>
+    <string name="haptic_reject">Misses and toggles off</string>
+    <string name="haptics_during_rumble">Also while the game rumbles</string>
+    <string name="haptics_during_rumble_caption">Interrupts the rumble briefly for each tick.</string>
+    <string name="settings_rumble">Game rumble</string>
+    <string name="rumble_mix">Motors</string>
+    <string name="mix_max">Stronger one</string>
+    <string name="mix_sum">Both added</string>
+    <string name="mix_large">Heavy only</string>
+    <string name="mix_small">Light only</string>
+    <string name="rumble_caption">A PC controller has a heavy and a light motor; the phone has one. The PC app can test the rumble.</string>
+
+    <!-- Display -->
+    <string name="settings_dim">Dim the screen while playing</string>
+    <string name="dim_caption">Saves battery and heat; the screen lights up again for menus and the layout editor.</string>
+
+    <!-- About -->
+    <string name="about_text">Mobile Controller turns this phone into a game controller for a Windows PC. Run the Mobile Controller app on the PC: it shows every connected phone with its latency and battery, can identify this phone and has a code to scan for connecting.</string>
+    <string name="about_version">App version %1$s</string>
+    <string name="about_device">This phone: %1$s</string>
+    <string name="about_device_id">Device id: %1$s</string>
+    <string name="about_protocol">Protocol version %1$d</string>
+</resources>

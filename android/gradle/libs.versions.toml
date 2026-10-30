@@ -3,10 +3,18 @@ agp = "9.4.1"
 # AGP 9.4.1 carries KGP 2.2.10 as a runtime dependency; the buildscript classpath entry upgrades it.
 kotlin = "2.4.21"
 junit = "4.13.2"
+# The settings screens only (Jetpack Compose); the controller surface stays a plain View.
+composeBom = "2026.09.00"
+activityCompose = "1.13.0"
 
 [libraries]
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+# The Compose compiler ships with Kotlin and must match its version.
+kotlin-compose-gradle-plugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
 junit = { module = "junit:junit", version.ref = "junit" }
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -6,6 +6,8 @@ buildscript {
         // AGP 9 compiles Kotlin itself (built-in Kotlin); this only raises the bundled KGP/compiler
         // from 2.2.10 to the current stable release, as the AGP 9 release notes prescribe.
         classpath(libs.kotlin.gradle.plugin)
+        // The Compose compiler plugin, at the same Kotlin version (applied by id in :app).
+        classpath(libs.kotlin.compose.gradle.plugin)
     }
 }
 

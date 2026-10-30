@@ -134,6 +134,9 @@ class GamepadState(private val clock: Clock = Clock(System::nanoTime)) {
     /** Digital bits the fingers hold right now, local bits included (gyro gates read it). */
     fun heldBits(): Int = synchronized(lock) { held }
 
+    /** The gyro's current right-stick offset, packed like StickMath.pack (the settings' live gauge reads it). */
+    fun motionRightStick(): Int = synchronized(lock) { (motionRx shl 16) or (motionRy and 0xFFFF) }
+
     /** Releases everything, including owed edges, so the next snapshot is fully neutral. */
     fun neutralize() = synchronized(lock) {
         held = 0

@@ -5,7 +5,7 @@ state over UDP. The PC presents each phone to games as a virtual Xbox 360 contro
 
 | Part | What it is |
 |---|---|
-| `android/` | The phone app (Kotlin, no runtime dependencies) |
+| `android/` | The phone app (Kotlin): a canvas-drawn controller, with a Jetpack Compose settings screen |
 | `server/src/MobileController.Server` | The Windows server: a .NET 10 console app driving ViGEmBus |
 | `server/src/MobileController.Desktop` | The desktop app (WPF): starts and watches the server, with status, diagnostics and settings |
 | `server/src/MobileController.Control` | What the server and the desktop app share: control-pipe messages, the settings file, adapter hints |
@@ -90,6 +90,11 @@ You can set it in several places. When more than one applies, the first match wi
 The phone then labels its buttons ✕ ○ □ △.
 
 ## Phone settings worth knowing
+
+Open the settings with the gear. They cover the whole screen, but the controller stays connected underneath,
+so the PC keeps its pad while you change things. Changes to feel, gyro and haptics take effect as you make
+them: try a deadzone on the **Try it** stick or feel a haptic strength with **Test**. **Done** (or Back) saves;
+**Cancel** puts everything back.
 
 - **Minimum press** (default 20 ms): a tap shorter than this is held this long, so a game that reads the
   controller once per frame still sees it, and a lost packet can't swallow it. A quick double tap still

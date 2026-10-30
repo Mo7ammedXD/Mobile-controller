@@ -13,7 +13,7 @@ import kotlin.math.roundToInt
 
 const val LOG_TAG = "MobileController"
 
-/** User settings, persisted in SharedPreferences. Read at startup and when the settings dialog closes. */
+/** User settings, persisted in SharedPreferences. Read at startup and when the settings screen saves. */
 class Settings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 

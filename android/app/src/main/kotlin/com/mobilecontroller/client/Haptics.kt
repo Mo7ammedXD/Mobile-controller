@@ -121,6 +121,11 @@ class Haptics(context: Context) {
         handler.post(players[event])
     }
 
+    /** Plays [event] even when it is switched off: the settings screen's Test buttons. */
+    fun test(event: Int) {
+        if (effects[event] != null) handler.post(players[event])
+    }
+
     private fun playNow(event: Int) {
         val v = vibrator ?: return
         val effect = effects[event] ?: return

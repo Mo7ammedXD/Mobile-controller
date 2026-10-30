@@ -1,8 +1,6 @@
 package com.mobilecontroller.client
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -19,10 +17,16 @@ import android.util.Log
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.view.ViewGroup
 import android.view.WindowManager
-import android.window.OnBackInvokedCallback
-import android.window.OnBackInvokedDispatcher
+import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.lifecycle.ViewModelProvider
 import com.mobilecontroller.client.net.ConnectLink
 import com.mobilecontroller.client.net.Discovery
 import com.mobilecontroller.client.net.KnownPcs
@@ -31,19 +35,28 @@ import com.mobilecontroller.client.protocol.Protocol
 import com.mobilecontroller.client.ui.GameMode
 import com.mobilecontroller.client.ui.GameModes
 import com.mobilecontroller.client.ui.GamepadView
-import com.mobilecontroller.client.ui.SettingsDialog
+import com.mobilecontroller.client.ui.settings.ControllerTheme
+import com.mobilecontroller.client.ui.settings.LinkStatus
+import com.mobilecontroller.client.ui.settings.SettingsEditor
+import com.mobilecontroller.client.ui.settings.SettingsHost
+import com.mobilecontroller.client.ui.settings.SettingsScreen
 
 /**
  * The single, immersive, landscape controller screen.
  *
  * Lifecycle contract: resumed -> the link sends (after Android 17's local-network permission is
  * granted); paused -> one neutral INPUT, then silence; finished -> BYE x3 and the socket closes. The
- * link survives configuration-change recreation (onRetainNonConfigurationInstance), because a new
- * socket means a new source port, which the PC would treat as a brand-new controller.
+ * link lives in a ViewModel ([LinkHolder]) and so survives a recreation, because a new socket means a
+ * new source port, which the PC would treat as a brand-new controller.
+ *
+ * The settings are a Compose screen laid over the controller in the same activity: the activity stays
+ * resumed, so the link keeps the PC's pad plugged in (a separate activity would pause it), and the
+ * screen's previews use the running sensors and vibrator. Edits apply live and Cancel restores them.
  */
-class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, UdpLink.IdentifyListener {
+class MainActivity : ComponentActivity(), GamepadView.Listener, UdpLink.GameListener, UdpLink.IdentifyListener, SettingsHost {
     private lateinit var settings: Settings
     private lateinit var link: UdpLink
+    private lateinit var root: FrameLayout
     private lateinit var view: GamepadView
     private lateinit var discovery: Discovery
     private lateinit var motion: MotionInput
@@ -80,9 +93,13 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
         override fun onDisplayRemoved(displayId: Int) = Unit
         override fun onDisplayChanged(displayId: Int) = updateRotation()
     }
-    private var settingsDialog: SettingsDialog? = null
+    // The settings screen while it is open: its view over the controller, and the edits it holds.
+    private var settingsView: ComposeView? = null
+    private var editor: SettingsEditor? = null
+    private val settingsOpen get() = settingsView != null
+
     private var permissionDialog: AlertDialog? = null
-    private var backCallback: Any? = null
+    private val permissionRequest = registerForActivityResult(ActivityResultContracts.RequestPermission(), ::onPermissionResult)
 
     private var resumed = false
     private var permissionRequestPending = false
@@ -94,17 +111,17 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = Settings(this)
-        val connectivity = getSystemService(ConnectivityManager::class.java)
-        link = lastNonConfigurationInstance as? UdpLink
-            ?: UdpLink(GamepadState(), Rumble(Haptics(applicationContext)), connectivity)
-        discovery = Discovery(connectivity)
+        link = ViewModelProvider(this)[LinkHolder::class.java].link
+        discovery = Discovery(getSystemService(ConnectivityManager::class.java))
         motion = MotionInput(applicationContext, link)
         link.gameListener = this
         link.identifyListener = this
         link.setIdentity(DeviceIdentity.id(this), DeviceIdentity.name(this), DeviceIdentity.appVersion(this))
         view = GamepadView(this, link)
         view.listener = this
-        setContentView(view)
+        root = FrameLayout(this)
+        root.addView(view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        setContentView(root)
         setUpWindow()
         wifiLock = createWifiLock()
 
@@ -117,16 +134,22 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
         firstRun = !extrasGiven && !linked && settings.host.isEmpty()
         applySettings()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val callback = OnBackInvokedCallback { onBack() }
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback)
-            backCallback = callback
-        }
+        // The settings screen registers its own Back (= Done) on top of this one while it is open.
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() = onBack()
+            },
+        )
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // A new target must not be overwritten by the open screen's Save: its edits are dropped.
+        if (settingsOpen && (intent.action == Intent.ACTION_VIEW || intent.hasExtra(EXTRA_HOST) || intent.hasExtra(EXTRA_MODE))) {
+            closeSettings(save = false, editLayout = false)
+        }
         // singleTask: a second launch (e.g. `am start` with new extras) retargets this instance; onResume follows.
         if (applyExtras(intent)) firstRun = false
         if (handleLink(intent)) firstRun = false
@@ -206,24 +229,15 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
         if (link.identifyListener === this) link.identifyListener = null
         view.removeCallbacks(dim)
         discovery.cancel()
-        settingsDialog?.dismiss()
         permissionDialog?.dismiss()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            (backCallback as? OnBackInvokedCallback)?.let(onBackInvokedDispatcher::unregisterOnBackInvokedCallback)
-        }
-        if (!isChangingConfigurations) {
-            link.close()
-            link.rumble.haptics.release()
-        }
+        // The link closes with its LinkHolder, when the activity finishes for good.
         super.onDestroy()
     }
 
-    override fun onRetainNonConfigurationInstance(): Any = link
-
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        // Dialogs and the permission prompt bring the bars back on some versions; a closed dialog (even
-        // a cancelled one) may also allow dimming again.
+        // Dialogs, the keyboard and the permission prompt bring the bars back on some versions; a closed
+        // dialog (even a cancelled one) may also allow dimming again.
         if (hasFocus) {
             hideSystemBars()
             updateDim()
@@ -263,29 +277,44 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
             Log.i(LOG_TAG, "mode ${mode.id}")
         }
         view.setMirrored(settings.leftHanded)
-        view.haptics = settings.haptics
-        link.state.minPressNanos = settings.minPressMs * NANOS_PER_MS
-        val router = view.router
-        router.innerDeadzone[0] = settings.deadzonePercent / 100f
-        router.innerDeadzone[1] = settings.deadzoneRightPercent / 100f
-        for (i in 0..1) {
-            router.outerDeadzone[i] = settings.outerDeadzonePercent[i] / 100f
-            router.deadzoneShape[i] = settings.deadzoneShape[i]
-            router.anchor[i] = settings.stickAnchor[i]
-            router.invertX[i] = settings.invertX[i]
-            router.invertY[i] = settings.invertY[i]
-        }
-        router.dpadDeadzone = settings.dpadDeadzonePercent / 100f
-        router.dpadDiagonal = Math.toRadians(settings.dpadDiagonalDegrees.toDouble()).toFloat()
-        router.dpadFourWay = settings.dpadFourWay
-        router.edgeOnRadius = settings.edgeOnPercent / 100f
-        // The release ring must sit inside the start ring, or the edge action would flicker.
-        router.edgeOffRadius = minOf(settings.edgeOffPercent, settings.edgeOnPercent - 5) / 100f
-        router.pedalMin = settings.pedalMinPercent / 100f
-        router.pedalGain = settings.pedalGainPercent / 100f
-        router.pedalCurve = settings.pedalCurveTenths / 10f
-        router.floating = settings.floatingButtons
         val feel = settings.feel(mode)
+        applyFeel(settings, mode, feel)
+        motion.mode = motionFor(mode, feel)
+        if (resumed) motion.restart()
+        link.setProfileName(mode.title)
+        link.setOutputPreference(settings.outputPreference)
+        link.setStatusFlag(Protocol.STATUS_MOTION_ACTIVE, motion.mode != GameMode.MOTION_NONE)
+        if (resumed && hasLocalNetworkPermission()) startLink()
+        updateDim()
+    }
+
+    /**
+     * Everything about how input feels and feedback plays, from [s] (the saved settings, or the settings screen's
+     * edits while it is open). Not the layout, link target or PC-side output: those change only on Save.
+     */
+    private fun applyFeel(s: Settings, mode: GameMode, feel: Settings.ModeFeel) {
+        view.haptics = s.haptics
+        link.state.minPressNanos = s.minPressMs * NANOS_PER_MS
+        val router = view.router
+        router.innerDeadzone[0] = s.deadzonePercent / 100f
+        router.innerDeadzone[1] = s.deadzoneRightPercent / 100f
+        for (i in 0..1) {
+            router.outerDeadzone[i] = s.outerDeadzonePercent[i] / 100f
+            router.deadzoneShape[i] = s.deadzoneShape[i]
+            router.anchor[i] = s.stickAnchor[i]
+            router.invertX[i] = s.invertX[i]
+            router.invertY[i] = s.invertY[i]
+        }
+        router.dpadDeadzone = s.dpadDeadzonePercent / 100f
+        router.dpadDiagonal = Math.toRadians(s.dpadDiagonalDegrees.toDouble()).toFloat()
+        router.dpadFourWay = s.dpadFourWay
+        router.edgeOnRadius = s.edgeOnPercent / 100f
+        // The release ring must sit inside the start ring, or the edge action would flicker.
+        router.edgeOffRadius = minOf(s.edgeOffPercent, s.edgeOnPercent - 5) / 100f
+        router.pedalMin = s.pedalMinPercent / 100f
+        router.pedalGain = s.pedalGainPercent / 100f
+        router.pedalCurve = s.pedalCurveTenths / 10f
+        router.floating = s.floatingButtons
         val antiDeadzone = feel.antiDeadzonePercent / 100f
         val sensitivity = feel.sensitivityPercent / 100f
         router.antiDeadzone[0] = feel.antiDeadzoneLeftPercent / 100f
@@ -295,53 +324,41 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
         // The aim curve shapes only the right stick: movement and steering stay linear.
         router.curve[0] = 1f
         router.curve[1] = feel.curveTenths / 10f
-        motion.mode = if (feel.motion && motion.isAvailable(mode.motion)) mode.motion else GameMode.MOTION_NONE
-        motion.aimGate = if (settings.gyroWhileAiming) mode.aimGate else 0
-        motion.sensitivity = settings.motionSensitivityPercent / 100f
+        motion.aimGate = if (s.gyroWhileAiming) mode.aimGate else 0
+        motion.sensitivity = s.motionSensitivityPercent / 100f
         motion.antiDeadzone = antiDeadzone
-        applyGyro(antiDeadzone)
-        if (resumed) motion.restart()
-        link.rumble.enabled = settings.rumble
-        link.rumble.gain = settings.rumbleGainPercent / 100f
-        link.rumble.mix = settings.rumbleMix
+        applyGyro(s, antiDeadzone)
+        link.rumble.enabled = s.rumble
+        link.rumble.gain = s.rumbleGainPercent / 100f
+        link.rumble.mix = s.rumbleMix
         val haptics = link.rumble.haptics
-        haptics.configure(settings.hapticIntensityPercent / 100f)
-        haptics.enabledEvents = settings.hapticEvents
-        haptics.playDuringRumble = settings.hapticsDuringRumble
-        link.setProfileName(mode.title)
-        link.setOutputPreference(settings.outputPreference)
-        link.setStatusFlag(Protocol.STATUS_MOTION_ACTIVE, motion.mode != GameMode.MOTION_NONE)
-        if (resumed && hasLocalNetworkPermission()) startLink()
-        updateDim()
+        haptics.configure(s.hapticIntensityPercent / 100f)
+        haptics.enabledEvents = s.hapticEvents
+        haptics.playDuringRumble = s.hapticsDuringRumble
     }
 
-    private fun applyGyro(antiDeadzone: Float) {
+    private fun motionFor(mode: GameMode, feel: Settings.ModeFeel): Int =
+        if (feel.motion && motion.isAvailable(mode.motion)) mode.motion else GameMode.MOTION_NONE
+
+    private fun applyGyro(s: Settings, antiDeadzone: Float) {
         val gyro = motion.gyro
-        gyro.sensitivity = settings.motionSensitivityPercent / 100f
-        gyro.sensitivityX = settings.gyroSensitivityXPercent / 100f
-        gyro.sensitivityY = settings.gyroSensitivityYPercent / 100f
-        gyro.invertX = settings.gyroInvertX
-        gyro.invertY = settings.gyroInvertY
-        gyro.axisMode = settings.gyroAxis
+        gyro.sensitivity = s.motionSensitivityPercent / 100f
+        gyro.sensitivityX = s.gyroSensitivityXPercent / 100f
+        gyro.sensitivityY = s.gyroSensitivityYPercent / 100f
+        gyro.invertX = s.gyroInvertX
+        gyro.invertY = s.gyroInvertY
+        gyro.axisMode = s.gyroAxis
         gyro.antiDeadzone = antiDeadzone
-        gyro.smoothThreshold = Math.toRadians(settings.gyroSmoothingDegrees.toDouble()).toFloat()
-        gyro.tightening = Math.toRadians(settings.gyroTighteningDegrees.toDouble()).toFloat()
-        gyro.accelGain = settings.gyroAccelPercent / 100f
-        gyro.autoCalibrate = settings.gyroAutoCalibrate
-        // The stored bias is this phone's last measurement; automatic calibration refines it from there.
+        gyro.smoothThreshold = Math.toRadians(s.gyroSmoothingDegrees.toDouble()).toFloat()
+        gyro.tightening = Math.toRadians(s.gyroTighteningDegrees.toDouble()).toFloat()
+        gyro.accelGain = s.gyroAccelPercent / 100f
+        gyro.autoCalibrate = s.gyroAutoCalibrate
+        // The stored bias is this phone's last measurement; automatic calibration refines it from there. Always the
+        // saved one: a calibration while the settings screen is open stores it there, not in the screen's edits.
         if (!gyro.calibrating) {
             gyro.biasX = settings.gyroBiasX
             gyro.biasY = settings.gyroBiasY
             gyro.biasZ = settings.gyroBiasZ
-        }
-    }
-
-    /** Settings: "Calibrate gyro". The phone should lie still for the next two seconds. */
-    private fun calibrateGyro() {
-        Toast.makeText(this, R.string.gyro_calibrating, Toast.LENGTH_SHORT).show()
-        motion.calibrate { x, y, z ->
-            settings.saveGyroBias(x, y, z)
-            Toast.makeText(this, R.string.gyro_calibrated, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -353,17 +370,90 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
 
     private fun startLink() = link.start(settings.host, settings.port, settings.rateHz)
 
+    // ---------------------------------------------------------------------------------------------
+    // The settings screen
+
     private fun openSettings(discover: Boolean) {
-        if (settingsDialog?.isShowing == true) return
+        if (settingsOpen) return
         view.releaseAll()
-        settingsDialog = SettingsDialog(this, settings, discovery, motion::isAvailable, ::calibrateGyro) { editLayout ->
-            applySettings()
-            if (editLayout) view.startEditing()
-        }.also {
-            it.show(discover)
-            updateDim()
+        // A search still running from rediscovery would retarget behind the screen, and its Save would undo that.
+        discovery.cancel()
+        val editor = SettingsEditor(this)
+        editor.onChange = { previewSettings(editor) }
+        this.editor = editor
+        val screen = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent { ControllerTheme { SettingsScreen(editor, this@MainActivity, startSearch = discover) } }
+        }
+        settingsView = screen
+        root.addView(screen, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        updateDim()
+    }
+
+    /** The screen's edits, applied as they are made: the player feels a deadzone or haptic strength before saving. */
+    private fun previewSettings(editor: SettingsEditor) {
+        val mode = editor.mode
+        val feel = editor.feel()
+        applyFeel(editor.settings, mode, feel)
+        // Sensors start and stop only when the motion control itself changes, not for every slider step.
+        val motionMode = motionFor(mode, feel)
+        if (motionMode != motion.mode) {
+            motion.mode = motionMode
+            if (resumed) motion.restart()
+            link.setStatusFlag(Protocol.STATUS_MOTION_ACTIVE, motionMode != GameMode.MOTION_NONE)
         }
     }
+
+    override fun closeSettings(save: Boolean, editLayout: Boolean) {
+        val screen = settingsView ?: return
+        settingsView = null
+        editor = null
+        discovery.cancel()
+        root.removeView(screen)
+        // The screen saved its edits already; load them as stored. Without saving, this restores the previews.
+        if (save) settings = Settings(this)
+        applySettings()
+        if (editLayout) view.startEditing()
+        hideSystemBars()
+        updateDim()
+    }
+
+    override fun linkStatus(): LinkStatus {
+        val code = if (view.permissionMissing) 0 else link.status(System.nanoTime())
+        val connected = code == UdpLink.STATUS_CONNECTED
+        val flags = link.feedbackFlags
+        val rtt = link.rttMicros
+        return LinkStatus(
+            code = code,
+            host = link.host,
+            port = link.port,
+            rttMs = if (connected && rtt >= 0) (rtt + 500) / 1000 else -1,
+            player = if (connected) link.playerIndex else -1,
+            ds4 = connected && (flags and Protocol.FLAG_TARGET_DS4) != 0,
+            dryRun = connected && (flags and Protocol.FLAG_DRY_RUN) != 0,
+        )
+    }
+
+    override fun findPcs(port: Int, onDone: (List<Discovery.Server>) -> Unit) = discovery.start(port, onDone)
+
+    override fun motionAvailable(motion: Int): Boolean = this.motion.isAvailable(motion)
+
+    /** "Calibrate gyro": the phone should lie still for the next two seconds. */
+    override fun calibrateGyro(onDone: () -> Unit) {
+        if (!motion.isAvailable(GameMode.MOTION_AIM)) {
+            onDone()
+            return
+        }
+        motion.calibrate { x, y, z ->
+            settings.saveGyroBias(x, y, z)
+            Toast.makeText(this, R.string.gyro_calibrated, Toast.LENGTH_SHORT).show()
+            onDone()
+        }
+    }
+
+    override fun gyroOutput(): Int = motion.preview
+
+    override fun testHaptic(event: Int) = link.rumble.haptics.test(event)
 
     override fun onMenu() = openSettings(discover = false)
 
@@ -378,10 +468,13 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
         }
         rediscoverBackoff = REDISCOVER_MIN_MS
         rediscoverAt = 0L
-        settings.knownPcs.remember(KnownPcs.KnownPc(settings.serverName, settings.host, settings.port))
+        val pc = KnownPcs.KnownPc(settings.serverName, settings.host, settings.port)
+        settings.knownPcs.remember(pc)
         settings.save()
+        // The open screen saves its own copy of the list; it must not drop this PC.
+        editor?.settings?.knownPcs?.remember(pc)
         // A typed-in address has no name yet: one quiet search learns it, so the PC can be found again later.
-        if (settings.serverName.isEmpty() && settingsDialog?.isShowing != true) learnServerName()
+        if (settings.serverName.isEmpty() && !settingsOpen) learnServerName()
     }
 
     private fun learnServerName() {
@@ -399,7 +492,7 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
     /** Every few seconds while the PC is lost: search for it by name, backing off from 5 to 30 s. */
     private fun maybeRediscover() {
         val name = settings.serverName
-        if (name.isEmpty() || connected || !resumed || settingsDialog?.isShowing == true || !hasLocalNetworkPermission()) return
+        if (name.isEmpty() || connected || !resumed || settingsOpen || !hasLocalNetworkPermission()) return
         val now = SystemClock.elapsedRealtime()
         if (now - disconnectedSince < REDISCOVER_AFTER_MS || now < rediscoverAt) return
         rediscoverAt = now + rediscoverBackoff
@@ -424,7 +517,7 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
      */
     private fun updateDim() {
         view.removeCallbacks(dim)
-        val menuOpen = view.editing || settingsDialog?.isShowing == true
+        val menuOpen = view.editing || settingsOpen
         // The PC shows "in settings" instead of wondering why this controller went neutral.
         link.setStatusFlag(Protocol.STATUS_MENU_OPEN, menuOpen)
         val playing = settings.dimScreen && connected && resumed && !menuOpen
@@ -462,7 +555,7 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
     private fun onDetectedMode() {
         val mode = detectedMode ?: return
         if (!settings.autoMode || mode === view.layout.mode) return
-        if (!resumed || view.editing || settingsDialog?.isShowing == true) {
+        if (!resumed || view.editing || settingsOpen) {
             // Not now: the PC repeats GAME every 2 s, so let the next one try again.
             link.forgetDetectedGame()
             return
@@ -495,14 +588,11 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
         view.permissionMissing = true
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.CINNAMON_BUN || permissionRequestPending) return
         permissionRequestPending = true
-        requestPermissions(arrayOf(Manifest.permission.ACCESS_LOCAL_NETWORK), REQUEST_LOCAL_NETWORK)
+        permissionRequest.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != REQUEST_LOCAL_NETWORK) return
+    private fun onPermissionResult(granted: Boolean) {
         permissionRequestPending = false
-        val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
         permissionDenied = !granted
         Log.i(LOG_TAG, "local network permission ${if (granted) "granted" else "denied"}")
         // Usually onResume follows and acts on this; if the prompt did not pause us, act now.
@@ -585,7 +675,10 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
         }
     }
 
-    /** Back exits only when pressed twice within 2 s, so a stray edge swipe never ends a game session. */
+    /**
+     * Back exits only when pressed twice within 2 s, so a stray edge swipe never ends a game session. (The settings
+     * screen handles Back itself while it is open.)
+     */
     private fun onBack() {
         val now = System.nanoTime()
         when {
@@ -598,18 +691,11 @@ class MainActivity : Activity(), GamepadView.Listener, UdpLink.GameListener, Udp
         }
     }
 
-    // Lint cannot see that API 33+ registers an OnBackInvokedCallback in onCreate (predictive back then
-    // never calls this); below 33 this is the only back hook a framework Activity has.
-    @SuppressLint("GestureBackNavigation")
-    @Deprecated("Only reached below API 33; newer versions use the OnBackInvokedCallback.")
-    override fun onBackPressed() = onBack()
-
     private companion object {
         const val EXTRA_HOST = "host"
         const val EXTRA_PORT = "port"
         const val EXTRA_RATE = "rate"
         const val EXTRA_MODE = "mode"
-        const val REQUEST_LOCAL_NETWORK = 1
         const val DOUBLE_BACK_NANOS = 2_000_000_000L
         const val DIM_DELAY_MS = 4_000L
         const val DIM_BRIGHTNESS = 0.05f
