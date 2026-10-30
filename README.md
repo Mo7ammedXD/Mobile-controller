@@ -294,8 +294,9 @@ cd android
 adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 # Tests
-dotnet test --solution ..\server\MobileController.slnx
 .\gradlew.bat :app:testDebugUnitTest :app:lintDebug
+cd ..\server # dotnet test finds global.json, which selects the test runner, only from here or below
+dotnet test --solution MobileController.slnx
 ```
 
 The phone app builds and tests on any OS (`./gradlew` instead of `.\gradlew.bat`). The server and the desktop app

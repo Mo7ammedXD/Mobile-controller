@@ -103,7 +103,7 @@
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" Content="Rename" Command="{Binding Rename}"
                                             CommandParameter="{Binding Text, ElementName=AliasBox}" Margin="8,0,0,0" Padding="12,4" />
-                                    <TextBox x:Name="AliasBox" Text="{Binding Alias, Mode=OneWay}" MaxLength="40"
+                                    <TextBox x:Name="AliasBox" Text="{Binding AliasDraft, UpdateSourceTrigger=PropertyChanged}" MaxLength="40"
                                              AutomationProperties.Name="Name on this PC" />
                                 </DockPanel>
 

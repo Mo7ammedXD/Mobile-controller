@@ -73,7 +73,7 @@
     <string name="anti_deadzone">Anti-deadzone</string>
     <string name="anti_deadzone_caption">Starts the output just past the game\'s own deadzone, so small movements count at once.</string>
     <string name="sensitivity">Sensitivity</string>
-    <string name="sensitivity_caption">Above 100 %, full output comes before the edge of the circle (both sticks).</string>
+    <string name="sensitivity_caption" formatted="false">Above 100 %, full output comes before the edge of the circle (both sticks).</string>
     <string name="aim_curve">Aim precision</string>
     <string name="aim_curve_caption">Higher makes small right-stick movements finer, for aiming; 1.0 is linear.</string>
     <string name="curve_title">Response</string>

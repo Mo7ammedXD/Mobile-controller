@@ -13,6 +13,7 @@ public sealed class PadViewModel : ObservableObject
     private PadInfo _info;
     private LivePad? _live;
     private string? _alias;
+    private string? _aliasDraft;
 
     public PadViewModel(PadInfo info, MainViewModel owner)
     {
@@ -39,8 +40,20 @@ public sealed class PadViewModel : ObservableObject
         get => _alias;
         set
         {
-            if (Set(ref _alias, value)) OnPropertyChanged(nameof(Title));
+            if (!Set(ref _alias, value)) return;
+            AliasDraft = value;
+            OnPropertyChanged(nameof(Title));
         }
+    }
+
+    /// <summary>
+    /// The name box's text. It is separate from <see cref="Alias"/> because <see cref="Update"/> refreshes every binding
+    /// each snapshot, which would put the saved name back while the user types a new one.
+    /// </summary>
+    public string? AliasDraft
+    {
+        get => _aliasDraft;
+        set => Set(ref _aliasDraft, value);
     }
 
     public string Title => _alias ?? _info.DeviceName ?? $"Phone at {_info.EndPoint}";

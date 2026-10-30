@@ -105,7 +105,8 @@ public partial class App : Application
         if (_quitting) return;
         if (_model?.Desktop.CloseToTray != true)
         {
-            Quit();
+            // The window is closing already, and closing it again from here would throw.
+            Quit(closeWindow: false);
             return;
         }
         // Closing the window keeps the phones working: the app lives on in the notification area.
@@ -119,11 +120,13 @@ public partial class App : Application
         }
     }
 
-    public void Quit()
+    public void Quit() => Quit(closeWindow: true);
+
+    private void Quit(bool closeWindow)
     {
         if (_quitting) return;
         _quitting = true;
-        _window?.Close();
+        if (closeWindow) _window?.Close();
         _model?.Dispose();
         if (_tray is not null)
         {

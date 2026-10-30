@@ -84,6 +84,20 @@ public sealed class ServerLoopTests
     }
 
     [Fact]
+    public void A_neutral_first_state_still_reaches_the_new_pad()
+    {
+        using var h = new ServerHarness();
+        using var client = h.Connect();
+
+        client.SendInput(0, default);
+        h.PumpDatagrams();
+        client.SendInput(1, default);
+        h.PumpDatagrams();
+
+        Assert.Equal(new[] { default(PadState) }, Assert.Single(h.Factory.Pads).History);
+    }
+
+    [Fact]
     public void A_queued_burst_is_submitted_once_with_the_newest_state()
     {
         using var h = new ServerHarness();

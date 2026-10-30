@@ -45,8 +45,10 @@ data class ConnectLink(val host: String, val port: Int, val name: String?) {
             return result
         }
 
+        // The charset-name overload: decode(String, Charset) is API 33 and would crash below Android 13. The JVM unit
+        // tests cannot catch that, since the desktop JDK has both.
         private fun decode(text: String): String? = try {
-            URLDecoder.decode(text, Charsets.UTF_8)
+            URLDecoder.decode(text, "UTF-8")
         } catch (_: IllegalArgumentException) {
             null
         }
