@@ -40,6 +40,7 @@ install and connect them.
 - [Building from source](#building-from-source)
 - [Making a release](#making-a-release)
 - [Project layout](#project-layout)
+- [License](#license)
 
 ## How it works
 
@@ -362,3 +363,7 @@ each release as an update. To publish files you built yourself instead, run
 | `scripts/Build-Release.ps1` | Builds the release downloads: the Windows zip and the signed APK |
 | `docs/PROTOCOL.md` | The wire protocol. Both sides implement it and test against its golden vectors |
 | `docs/GAME_MODES.md` | The touch layouts and why they look the way they do |
+
+## License
+
+[MIT](LICENSE). You can use, change and share the code, as long as you keep the license notice.
